@@ -117,7 +117,9 @@ function ItemView({ item }: { item: Item }) {
     case "reasoning":
       return <p className="whitespace-pre-wrap text-xs italic text-neutral-500">{item.text}</p>;
     case "tool":
-      return <ToolCard {...item} />;
+      return (
+        <ToolCard kind={item.kind} name={item.name} input={item.input} result={item.result} runEnded={item.runEnded} />
+      );
     case "usage":
       return (
         <p className="text-right text-xs text-neutral-400">
