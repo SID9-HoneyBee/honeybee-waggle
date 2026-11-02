@@ -1,6 +1,11 @@
 {
   "name": "honeybee-waggle",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SID9-HoneyBee/honeybee-waggle.git"
+  },
   "type": "module",
   "packageManager": "pnpm@12.16.1",
   "engines": {
