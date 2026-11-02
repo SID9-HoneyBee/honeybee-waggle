@@ -42,6 +42,7 @@ adapters.set(
     getProfile: () => profiles.get("codex-api"),
     resolveKey,
     filesDir: (id) => store.filesDir(id),
+    loadHistory: (id) => store.readHistory(id),
     tools,
   }),
 );

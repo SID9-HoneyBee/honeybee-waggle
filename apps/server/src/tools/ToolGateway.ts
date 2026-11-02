@@ -62,8 +62,10 @@ export class ToolGateway extends EventEmitter<{
     input: unknown,
     signal: AbortSignal,
   ): Promise<{ ok: boolean; output: string }> {
+    // 한 응답에 도구 호출이 여러 개면 순서대로 실행한다. 중간에 사용자가 멈췄다면 나머지는 실행하지 않는다.
+    if (signal.aborted) return { ok: false, output: "사용자가 실행을 중단해서 실행하지 않음" };
     const config = this.lookup(sessionId);
-    if (!config) return { ok: false, output: "이 세션에는 연결된 폴더가 없음" };
+    if (!config) return { ok: false, output: "이 세션에는 연결된 폴더가 없음 (사용자가 연결을 해제함)" };
 
     let call;
     try {

@@ -65,6 +65,16 @@ const IGNORED_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", 
 const MAX_LIST_ENTRIES = 500;
 const MAX_LIST_DEPTH = 6;
 const MAX_READ_CHARS = 100_000;
+const MAX_READ_BYTES = 5 * 1024 * 1024;
+
+/**
+ * 승인을 기다리는 동안 사용자나 다른 세션(같은 폴더의 CLI 에이전트 등)이 파일을 고쳤을 수 있다.
+ * 승인한 diff는 대기 전 내용 기준이라, 그대로 쓰면 그 사이 변경을 말없이 덮어쓴다. 바뀌었으면 쓰지 않는다.
+ */
+async function assertUnchanged(file: string, expected: string | null): Promise<void> {
+  const current = await fs.readFile(file, "utf8").catch(() => null);
+  if (current !== expected) throw new Error("승인을 기다리는 동안 파일이 바뀌어서 쓰지 않음. 파일을 다시 읽고 수정해.");
+}
 
 export interface PreparedCall {
   action: ToolSpec["action"];
@@ -106,6 +116,7 @@ export async function prepareCall(root: string, name: string, input: Record<stri
         relPath,
         diff: createTwoFilesPatch(relPath, relPath, before, after),
         run: async () => {
+          await assertUnchanged(abs, before);
           await fs.writeFile(abs, after, "utf8");
           return `수정함: ${relPath}`;
         },
@@ -113,12 +124,13 @@ export async function prepareCall(root: string, name: string, input: Record<stri
     }
     case "write_file": {
       const content = String(input.content ?? "");
-      const before = await fs.readFile(abs, "utf8").catch(() => "");
+      const before = await fs.readFile(abs, "utf8").catch(() => null);
       return {
         action: "write",
         relPath,
-        diff: createTwoFilesPatch(relPath, relPath, before, content),
+        diff: createTwoFilesPatch(relPath, relPath, before ?? "", content),
         run: async () => {
+          await assertUnchanged(abs, before);
           await fs.mkdir(path.dirname(abs), { recursive: true });
           await fs.writeFile(abs, content, "utf8");
           return `저장함: ${relPath}`;
@@ -144,6 +156,9 @@ async function resolveInside(root: string, rel: string, forWrite: boolean): Prom
       real = path.join(await fs.realpath(probe), ...missing.reverse());
       break;
     } catch {
+      // realpath가 실패해도 "없는 경로"가 아니라 대상이 사라진 링크일 수 있다. 그걸 없는 파일로 취급하면
+      // 상위 폴더 기준 검사는 통과하고, 실제 쓰기는 링크를 따라 폴더 밖에 파일을 만든다. 링크 자체가 있으면 막는다.
+      if (await fs.lstat(probe).then(() => true, () => false)) throw new Error(`대상을 확인할 수 없는 링크라 접근할 수 없음: ${rel}`);
       const parent = path.dirname(probe);
       if (parent === probe) throw new Error(`경로를 확인할 수 없음: ${rel}`);
       missing.push(path.basename(probe));
@@ -165,7 +180,12 @@ async function listFiles(dir: string): Promise<string> {
       truncated = true;
       return;
     }
-    const entries = await fs.readdir(current, { withFileTypes: true });
+    // 권한 없는 폴더(System Volume Information 등) 하나 때문에 목록 전체가 실패하면 안 된다. 그 항목만 표시하고 넘어간다.
+    const entries = await fs.readdir(current, { withFileTypes: true }).catch(() => null);
+    if (!entries) {
+      lines.push(`${toSlash(path.relative(dir, current)) || "."}/ (접근 불가)`);
+      return;
+    }
     entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
     for (const e of entries) {
       if (lines.length >= MAX_LIST_ENTRIES) {
@@ -181,8 +201,8 @@ async function listFiles(dir: string): Promise<string> {
         lines.push(`${rel}/`);
         if (depth < MAX_LIST_DEPTH) await walk(path.join(current, e.name), depth + 1);
       } else {
-        const { size } = await fs.stat(path.join(current, e.name));
-        lines.push(`${rel} (${size}B)`);
+        const stat = await fs.stat(path.join(current, e.name)).catch(() => null);
+        lines.push(stat ? `${rel} (${stat.size}B)` : `${rel} (접근 불가)`);
       }
     }
   }
@@ -192,6 +212,11 @@ async function listFiles(dir: string): Promise<string> {
 }
 
 async function readFile(file: string, start?: number, end?: number): Promise<string> {
+  // 통째로 메모리에 올리기 전에 크기로 거른다. 수 GB 로그를 읽으면 서버 하나에 붙은 모든 세션이 멈춘다.
+  const { size } = await fs.stat(file);
+  if (size > MAX_READ_BYTES) {
+    throw new Error(`파일이 너무 큼 (${(size / 1024 / 1024).toFixed(1)}MB). 로그·데이터 파일이면 사용자에게 필요한 부분을 첨부해달라고 요청해.`);
+  }
   const text = await fs.readFile(file, "utf8");
   if (text.includes("\u0000")) throw new Error("텍스트 파일이 아님");
   let body = text;

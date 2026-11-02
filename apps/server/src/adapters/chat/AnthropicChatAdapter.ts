@@ -8,6 +8,7 @@ import type {
   RunRequest,
 } from "@honeybee-waggle/schema";
 import { composePrompt } from "../../session/transcript";
+import { FOLDER_TOOLS } from "../../tools/folderTools";
 import type { ToolGateway } from "../../tools/ToolGateway";
 import { anthropicCost } from "./modelCatalog";
 import { folderInstructions, MAX_TOOL_TURNS, toolKindOf } from "./chatTools";
@@ -22,7 +23,8 @@ interface AnthropicChatAdapterOptions {
 
 /**
  * 다음 턴에 대화를 그대로 다시 보내기 위해 저장하는 raw 이벤트의 표식.
- * assistant = 응답 content 원본, tool_results = 도구 결과 user 메시지 원본.
+ * assistant = 응답 content 원본, tool_results = 이번에 돌려준 도구 결과의 순서(ID 목록).
+ * 도구 결과 내용은 tool.completed 이벤트에 이미 저장되므로 여기엔 ID만 남긴다 (같은 출력을 두 번 저장하지 않게).
  */
 const ASSISTANT_RECORD = "anthropic.assistant";
 const TOOL_RESULTS_RECORD = "anthropic.tool_results";
@@ -59,8 +61,10 @@ export class AnthropicChatAdapter implements EngineAdapter {
       if (!model) throw new Error("모델이 정해지지 않음. 설정에서 모델 목록을 확인해줘.");
       const client = new Anthropic({ apiKey: this.opts.resolveKey(profile.apiKeyRef!) });
       const messages = buildMessages(await this.opts.loadHistory(req.sessionId), req.runId, req.prompt);
-      const specs = this.opts.tools.toolsFor(req.sessionId);
       const folder = this.opts.tools.folderOf(req.sessionId);
+      // 폴더를 해제해도 기록에 tool_use/tool_result가 남아 있으면 도구 정의 없이 보낼 때 API가 400을 낸다.
+      // 그런 세션은 정의만 계속 보내고, 실제 호출은 Gateway가 "연결 없음"으로 돌려준다.
+      const specs = folder || hasToolBlocks(messages) ? FOLDER_TOOLS : [];
       const tools: Anthropic.Beta.BetaToolUnion[] = specs.map((t) => ({
         name: t.name,
         description: t.description,
@@ -146,9 +150,14 @@ export class AnthropicChatAdapter implements EngineAdapter {
           yield { type: "tool.completed", runId, ts: now(), toolCallId: use.id, ok: r.ok, output: r.output };
           results.push({ type: "tool_result", tool_use_id: use.id, content: r.output, is_error: !r.ok });
         }
-        if (signal.aborted) throw new Error("aborted");
         messages.push({ role: "user", content: results });
-        yield { type: "raw", runId, ts: now(), engine: "claude", payload: { kind: TOOL_RESULTS_RECORD, content: results } };
+        // 중단됐더라도 결과 기록은 먼저 남긴다. 이미 실행된 수정이 다음 턴에 "중단됨"으로 재구성되면
+        // 모델은 파일이 안 바뀐 줄 알고 같은 수정을 다시 하거나 실제 디스크 상태와 다른 설명을 한다.
+        yield { type: "raw", runId, ts: now(), engine: "claude", payload: { kind: TOOL_RESULTS_RECORD, ids: toolUses.map((u) => u.id) } };
+        if (signal.aborted) {
+          yield { type: "run.completed", runId, ts: now(), status: "cancelled" };
+          return;
+        }
       }
 
       yield { type: "run.completed", runId, ts: now(), status: "success" };
@@ -188,6 +197,8 @@ function buildMessages(history: HistoryEntry[], currentRunId: string, prompt: st
     openToolUses = [];
   };
 
+  // tool_result 내용은 tool.completed에서 가져온다. 기록 순서상 tool.completed가 tool_results 표식보다 먼저 저장된다.
+  const outputs = new Map<string, { ok: boolean; output?: string }>();
   for (const e of history) {
     if (e.kind === "user") {
       // 이번 run의 user 항목은 이미 기록에 들어가 있다. 아래에서 prompt로 한 번만 넣는다.
@@ -195,15 +206,27 @@ function buildMessages(history: HistoryEntry[], currentRunId: string, prompt: st
       closeOpenToolUses();
       // 다른 세션·파일 첨부가 있던 턴은 당시 모델이 본 그대로(첨부 + 문장) 다시 보낸다.
       messages.push({ role: "user", content: composePrompt(e.context, e.text) });
+    } else if (e.event.type === "tool.completed") {
+      outputs.set(e.event.toolCallId, e.event);
     } else if (e.event.type === "raw") {
-      const p = e.event.payload as { kind?: string; content?: Anthropic.Beta.BetaContentBlockParam[] } | null;
-      if (!p?.content) continue;
-      if (p.kind === ASSISTANT_RECORD) {
+      const p = e.event.payload as {
+        kind?: string;
+        content?: Anthropic.Beta.BetaContentBlockParam[];
+        ids?: string[];
+      } | null;
+      if (p?.kind === ASSISTANT_RECORD && p.content) {
         closeOpenToolUses();
         messages.push({ role: "assistant", content: p.content });
         openToolUses = p.content.filter((b) => b.type === "tool_use").map((b) => (b as { id: string }).id);
-      } else if (p.kind === TOOL_RESULTS_RECORD) {
-        messages.push({ role: "user", content: p.content });
+      } else if (p?.kind === TOOL_RESULTS_RECORD) {
+        // 이전 형식(content 전체 저장)도 그대로 읽는다.
+        const content: Anthropic.Beta.BetaContentBlockParam[] =
+          p.content ??
+          (p.ids ?? []).map((id) => {
+            const r = outputs.get(id);
+            return { type: "tool_result", tool_use_id: id, content: r?.output ?? "결과 없음", is_error: !r?.ok };
+          });
+        messages.push({ role: "user", content });
         openToolUses = [];
       }
     }
@@ -211,4 +234,10 @@ function buildMessages(history: HistoryEntry[], currentRunId: string, prompt: st
   closeOpenToolUses();
   messages.push({ role: "user", content: prompt });
   return messages;
+}
+
+function hasToolBlocks(messages: Anthropic.Beta.BetaMessageParam[]): boolean {
+  return messages.some(
+    (m) => Array.isArray(m.content) && m.content.some((b) => b.type === "tool_use" || b.type === "tool_result"),
+  );
 }

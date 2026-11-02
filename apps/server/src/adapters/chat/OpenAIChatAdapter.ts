@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import OpenAI from "openai";
-import type { AdapterCapabilities, AgentEvent, BackendProfile, EngineAdapter, RunRequest } from "@honeybee-waggle/schema";
+import type { AdapterCapabilities, AgentEvent, BackendProfile, EngineAdapter, HistoryEntry, RunRequest } from "@honeybee-waggle/schema";
+import { FOLDER_TOOLS } from "../../tools/folderTools";
 import type { ToolGateway } from "../../tools/ToolGateway";
 import { folderInstructions, MAX_TOOL_TURNS, toolKindOf } from "./chatTools";
 
@@ -10,8 +11,12 @@ interface OpenAIChatAdapterOptions {
   getProfile: () => BackendProfile;
   resolveKey: (ref: string) => string;
   filesDir: (sessionId: string) => string;
+  loadHistory: (sessionId: string) => Promise<HistoryEntry[]>;
   tools: ToolGateway;
 }
+
+/** 이어가기 지점(응답 ID)과 그 응답에 아직 못 보낸 도구 결과를 기록하는 raw 이벤트의 표식 */
+const OPENAI_STATE = "openai.state";
 
 /**
  * OpenAI Responses API로 직접 대화한다 (runtime "chat"). 이미지 생성은 항상, 폴더가 연결되면 파일 도구도 준다.
@@ -40,13 +45,35 @@ export class OpenAIChatAdapter implements EngineAdapter {
     const now = () => Date.now();
     yield { type: "run.started", runId, ts: now(), engine: "codex", auth: profile.auth, runtime: "chat", model };
 
+    // GPT API가 codex CLI 방식이던 때 만든 세션은 codex thread ID를 들고 있다. 그걸 보내면 404라서 resp_ 형식만 이어받는다.
+    let previous = req.resumeNativeId?.startsWith("resp_") ? req.resumeNativeId : undefined;
+    // 다음 요청에 함께 보내야 하는 도구 결과. 지난 run이 도구 실행 뒤에 끊겼다면 그 결과가 여기로 이어진다.
+    let pending: OpenAI.Responses.ResponseInputItem[] = [];
+
+    /**
+     * run이 어떻게 끝나든 마지막으로 완료된 응답을 이어가기 지점으로 남긴다. 중간에 끊겼다고 이전 run의 응답으로 되돌아가면
+     * 이번 요청과 이미 디스크에 적용된 수정이 OpenAI 쪽 대화에서 통째로 사라진다.
+     * 그 응답이 도구 결과를 기다리는 상태면, 아직 못 보낸 결과를 기록해 두었다가 다음 run 첫 요청에 같이 보낸다.
+     */
+    const finish = (status: "success" | "error" | "cancelled", error?: string): AgentEvent[] => {
+      const events: AgentEvent[] = [];
+      if (pending.length > 0) {
+        events.push({ type: "raw", runId, ts: now(), engine: "codex", payload: { kind: OPENAI_STATE, responseId: previous, pending } });
+      }
+      events.push({ type: "run.completed", runId, ts: now(), status, error, nativeSessionId: previous });
+      return events;
+    };
+
     try {
+      if (previous) pending = findPendingOutputs(await this.opts.loadHistory(req.sessionId), previous);
       if (!model) throw new Error("모델이 정해지지 않음. 설정에서 모델 목록을 확인해줘.");
       const client = new OpenAI({ apiKey: this.opts.resolveKey(profile.apiKeyRef!) });
       const folder = this.opts.tools.folderOf(req.sessionId);
+      // 폴더를 해제했어도 지난 도구 호출에 대한 결과를 보내야 하는 경우엔 정의를 유지한다 (실제 호출은 Gateway가 막는다).
+      const specs = folder || pending.length > 0 ? FOLDER_TOOLS : [];
       const tools: OpenAI.Responses.Tool[] = [
         { type: "image_generation" },
-        ...this.opts.tools.toolsFor(req.sessionId).map(
+        ...specs.map(
           (t): OpenAI.Responses.FunctionTool => ({
             type: "function",
             name: t.name,
@@ -58,11 +85,9 @@ export class OpenAIChatAdapter implements EngineAdapter {
         ),
       ];
 
-      // GPT API가 codex CLI 방식이던 때 만든 세션은 codex thread ID를 들고 있다. 그걸 보내면 404라서 resp_ 형식만 이어받는다.
-      let previous = req.resumeNativeId?.startsWith("resp_") ? req.resumeNativeId : undefined;
-      let input: string | OpenAI.Responses.ResponseInputItem[] = req.prompt;
-
       for (let turn = 0; ; turn++) {
+        const input: OpenAI.Responses.ResponseInputItem[] =
+          turn === 0 ? [...pending, { role: "user", content: req.prompt }] : pending;
         const stream = await client.responses.create(
           {
             model,
@@ -119,41 +144,44 @@ export class OpenAIChatAdapter implements EngineAdapter {
               break;
             }
             case "response.failed":
-              yield { type: "run.completed", runId, ts: now(), status: "error", error: ev.response.error?.message ?? "응답 생성 실패" };
+              yield* finish("error", ev.response.error?.message ?? "응답 생성 실패");
               return;
             case "error":
-              yield { type: "run.completed", runId, ts: now(), status: "error", error: ev.message };
+              yield* finish("error", ev.message);
               return;
           }
         }
 
         if (!completedId) {
-          yield { type: "run.completed", runId, ts: now(), status: "error", error: "응답이 완료 이벤트 없이 끝남" };
+          yield* finish("error", "응답이 완료 이벤트 없이 끝남");
           return;
         }
+        // 이 응답이 보낸 입력(첫 턴의 프롬프트, 이후 턴의 도구 결과)을 받아들였으니 여기부터가 새 이어가기 지점이다.
         previous = completedId;
+        pending = [];
         if (calls.length === 0) {
-          yield { type: "run.completed", runId, ts: now(), status: "success", nativeSessionId: completedId };
+          yield* finish("success");
           return;
         }
         if (turn + 1 >= MAX_TOOL_TURNS) {
-          // 도구 결과를 돌려주지 못한 응답 ID로 이어가면 다음 턴이 400이 난다. 마지막 정상 지점을 남기지 않는다.
-          yield { type: "run.completed", runId, ts: now(), status: "error", error: `도구 사용이 ${MAX_TOOL_TURNS}번을 넘어 중단함` };
+          pending = calls.map((c) => ({ type: "function_call_output" as const, call_id: c.call_id, output: "도구 사용 상한을 넘어 실행하지 않음" }));
+          yield* finish("error", `도구 사용이 ${MAX_TOOL_TURNS}번을 넘어 중단함`);
           return;
         }
 
-        const outputs: OpenAI.Responses.ResponseInputItem[] = [];
         for (const call of calls) {
           const r = await this.opts.tools.execute(req.sessionId, runId, call.call_id, call.name, parseArgs(call.arguments), signal);
           yield { type: "tool.completed", runId, ts: now(), toolCallId: call.call_id, ok: r.ok, output: r.output };
-          outputs.push({ type: "function_call_output", call_id: call.call_id, output: r.ok ? r.output : `오류: ${r.output}` });
+          pending.push({ type: "function_call_output", call_id: call.call_id, output: r.ok ? r.output : `오류: ${r.output}` });
         }
-        if (signal.aborted) throw new Error("aborted");
-        input = outputs;
+        if (signal.aborted) {
+          yield* finish("cancelled");
+          return;
+        }
       }
     } catch (err) {
       if (signal.aborted) {
-        yield { type: "run.completed", runId, ts: now(), status: "cancelled" };
+        yield* finish("cancelled");
         return;
       }
       const message =
@@ -164,7 +192,7 @@ export class OpenAIChatAdapter implements EngineAdapter {
             : err instanceof Error
               ? err.message
               : String(err);
-      yield { type: "run.completed", runId, ts: now(), status: "error", error: message };
+      yield* finish("error", message);
     }
   }
 
@@ -190,6 +218,17 @@ export class OpenAIChatAdapter implements EngineAdapter {
     yield { type: "tool.completed", runId, ts: Date.now(), toolCallId: item.id, ok: true, output: item.revised_prompt ?? undefined };
     yield { type: "file.changed", runId, ts: Date.now(), path: `files/${name}`, change: "add" };
   }
+}
+
+/** 지난 run이 남긴 "못 보낸 도구 결과". 이어갈 응답 ID와 같을 때만 쓴다 (다른 지점의 결과를 섞으면 400) */
+function findPendingOutputs(history: HistoryEntry[], responseId: string): OpenAI.Responses.ResponseInputItem[] {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const e = history[i]!;
+    if (e.kind !== "event" || e.event.type !== "raw") continue;
+    const p = e.event.payload as { kind?: string; responseId?: string; pending?: OpenAI.Responses.ResponseInputItem[] } | null;
+    if (p?.kind === OPENAI_STATE) return p.responseId === responseId ? (p.pending ?? []) : [];
+  }
+  return [];
 }
 
 // 모델이 깨진 JSON을 보낼 수 있다. 예외로 run을 죽이지 않고 빈 인자로 넘겨서 도구 쪽 검증 오류로 돌려준다.

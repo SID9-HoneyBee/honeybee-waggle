@@ -18,6 +18,7 @@ import type { FileSessionStore } from "../store/FileSessionStore";
 import { buildFileBlock, buildTranscript, composePrompt } from "./transcript";
 
 // 한 메시지에 너무 많은 세션을 붙이면 컨텍스트가 순식간에 차서 막아둔다.
+const APPROVAL_POLICIES: readonly ApprovalPolicy[] = ["writes", "all", "none"];
 const MAX_REFS = 5;
 // 파일 첨부 한도. 웹에서도 같은 값으로 미리 막지만, 서버가 최종 기준이다.
 // 한 파일 20만 자(대략 8만 토큰)를 넘으면 대부분 로그·빌드 산출물이라 첨부보다 필요한 부분만 붙이는 게 맞다.
@@ -63,6 +64,12 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
    */
   async init(): Promise<void> {
     for (const meta of await this.store.loadAll()) {
+      // API 방식이 CLI+키였던 때 만든 세션은 cwd(작업 폴더)를 들고 있다. 지금 chat 세션에서 cwd는 "연결된 폴더"라서
+      // 그대로 두면 사용자가 연결한 적 없는 폴더에 파일 도구가 열린다. 폴더 연결은 approval과 함께만 저장되므로 그걸로 구분해 비운다.
+      if (meta.cwd && !meta.approval && this.isChat(meta)) {
+        meta.cwd = "";
+        await this.store.saveMeta(meta);
+      }
       this.sessions.set(meta.id, meta);
       const history = await this.store.readHistory(meta.id);
       this.seqs.set(meta.id, history.reduce((max, e) => Math.max(max, e.seq ?? 0), 0));
@@ -120,11 +127,15 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
    */
   async setFolder(sessionId: string, folder: string | null, approval: ApprovalPolicy): Promise<void> {
     const meta = this.require(sessionId);
-    if (this.profiles.get(meta.profileId).runtime !== "chat") throw new Error("폴더 연결은 API 세션에서만 쓸 수 있음 (구독 세션은 이미 작업 폴더에서 실행됨)");
+    if (!this.isChat(meta)) throw new Error("폴더 연결은 API 세션에서만 쓸 수 있음 (구독 세션은 이미 작업 폴더에서 실행됨)");
+    // 알 수 없는 값이 들어오면 Gateway에서 "승인 불필요"로 처리돼 모두 자동처럼 동작한다. 여기서 막는다.
+    if (!APPROVAL_POLICIES.includes(approval)) throw new Error(`알 수 없는 승인 방식: ${approval}`);
     if (this.running.has(sessionId)) throw new Error("실행 중에는 폴더를 바꿀 수 없음");
     if (folder !== null) {
       const stat = await fs.stat(folder.trim()).catch(() => undefined);
       if (!stat?.isDirectory()) throw new Error(`폴더가 없거나 폴더가 아님: ${folder}`);
+      // 위의 await 사이에 run이 시작됐을 수 있다. 실행 중인 run의 도구 범위가 바뀌지 않게 다시 확인한다.
+      if (this.running.has(sessionId)) throw new Error("실행 중에는 폴더를 바꿀 수 없음");
     }
     meta.cwd = folder?.trim() ?? "";
     meta.approval = approval;
@@ -134,8 +145,12 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
   /** ToolGateway가 도구 실행 시 묻는 세션 설정. 폴더가 없는 세션은 도구 자체가 없다 */
   toolConfig(sessionId: string): { folder: string; approval: ApprovalPolicy } | undefined {
     const meta = this.sessions.get(sessionId);
-    if (!meta?.cwd || this.profiles.get(meta.profileId).runtime !== "chat") return undefined;
-    return { folder: meta.cwd, approval: meta.approval ?? "writes" };
+    if (!meta?.cwd || !meta.approval || !this.isChat(meta)) return undefined;
+    return { folder: meta.cwd, approval: meta.approval };
+  }
+
+  private isChat(meta: SessionMeta): boolean {
+    return this.profiles.get(meta.profileId).runtime === "chat";
   }
 
   rename(sessionId: string, title: string): void {
