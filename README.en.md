@@ -93,6 +93,7 @@ The current version is developed and used on Windows. The next updates aim to im
 - Attachments beyond text files, such as images
 - A monthly budget cap for the GPT API as well
 - A distribution package that makes installing and running easier
+- Broader English coverage (including server messages) and Japanese support
 - **Authenticated remote access**: the plan is to let you direct work from other devices, such as your phone. The order matters:
   1. First, authentication (tokens, passkeys) and a configurable Origin allowlist
   2. Then, access over private networks such as Tailscale
