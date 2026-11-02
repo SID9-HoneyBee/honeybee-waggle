@@ -1,7 +1,9 @@
 import type {
   ClientMessage,
   HistoryEntry,
+  KeyProvider,
   PermissionLevel,
+  ProfileInfo,
   ServerMessage,
   SessionSummary,
 } from "@honeybee-waggle/schema";
@@ -20,11 +22,13 @@ export interface SessionView {
 export interface Snapshot {
   conn: ConnState;
   sessions: SessionSummary[];
+  profiles: ProfileInfo[];
   views: Record<string, SessionView>;
   notice?: { id: number; message: string };
 }
 
-type Pending = { resolve: (s: SessionSummary) => void; reject: (e: Error) => void };
+// 응답 형태가 요청마다 달라서(session.created / ack) resolve 값은 호출부에서 좁힌다.
+type Pending = { resolve: (value: unknown) => void; reject: (e: Error) => void };
 
 const EMPTY_VIEW: SessionView = { loaded: false, entries: [], lastSeq: 0, streaming: "" };
 const RECONNECT_MAX_MS = 10_000;
@@ -37,7 +41,7 @@ const RECONNECT_MAX_MS = 10_000;
  */
 export class WaggleClient {
   private ws?: WebSocket;
-  private snapshot: Snapshot = { conn: "connecting", sessions: [], views: {} };
+  private snapshot: Snapshot = { conn: "connecting", sessions: [], profiles: [], views: {} };
   private readonly listeners = new Set<() => void>();
   // StrictMode에서 effect가 두 번 돌면 open/close가 짝으로 두 번 온다. 참조 수로 세야 구독이 끊기지 않는다.
   private readonly openCounts = new Map<string, number>();
@@ -69,6 +73,7 @@ export class WaggleClient {
       this.reconnectDelay = 1_000;
       this.set({ conn: "open" });
       this.rawSend({ type: "session.list" });
+      this.rawSend({ type: "profile.list" });
       // 재연결이면 서버 쪽 구독이 사라진 상태다. 열려 있던 세션을 다시 열어 그 사이 놓친 기록을 받는다.
       for (const id of this.openCounts.keys()) this.rawSend({ type: "session.open", sessionId: id });
     };
@@ -108,15 +113,25 @@ export class WaggleClient {
     this.rawSend({ type: "session.close", sessionId: id });
   }
 
-  createSession(input: { title?: string; cwd: string; permission: PermissionLevel }): Promise<SessionSummary> {
-    const reqId = this.nextReqId();
-    return new Promise((resolve, reject) => {
-      if (!this.rawSend({ type: "session.create", reqId, ...input })) {
-        reject(new Error("서버에 연결되어 있지 않음"));
-        return;
-      }
-      this.pending.set(reqId, { resolve, reject });
-    });
+  createSession(input: {
+    title?: string;
+    cwd: string;
+    permission: PermissionLevel;
+    profileId: string;
+  }): Promise<SessionSummary> {
+    return this.request({ type: "session.create", ...input }) as Promise<SessionSummary>;
+  }
+
+  async setKey(provider: KeyProvider, key: string): Promise<void> {
+    await this.request({ type: "settings.setKey", provider, key });
+  }
+
+  async deleteKey(provider: KeyProvider): Promise<void> {
+    await this.request({ type: "settings.deleteKey", provider });
+  }
+
+  async setBudget(profileId: string, budgetUsd: number | null): Promise<void> {
+    await this.request({ type: "settings.setBudget", profileId, budgetUsd });
   }
 
   sendMessage(sessionId: string, text: string): void {
@@ -137,6 +152,12 @@ export class WaggleClient {
     switch (msg.type) {
       case "session.list":
         this.set({ sessions: msg.sessions });
+        return;
+      case "profile.list":
+        this.set({ profiles: msg.profiles });
+        return;
+      case "ack":
+        if (msg.reqId) this.settle(msg.reqId, (p) => p.resolve(undefined));
         return;
       case "session.created":
         this.upsertSession(msg.session);
@@ -215,6 +236,17 @@ export class WaggleClient {
 
   private notify(message: string): void {
     this.set({ notice: { id: ++this.noticeSeq, message } });
+  }
+
+  private request(msg: ClientMessage): Promise<unknown> {
+    const reqId = this.nextReqId();
+    return new Promise((resolve, reject) => {
+      if (!this.rawSend({ ...msg, reqId })) {
+        reject(new Error("서버에 연결되어 있지 않음"));
+        return;
+      }
+      this.pending.set(reqId, { resolve, reject });
+    });
   }
 
   private rawSend(msg: ClientMessage): boolean {

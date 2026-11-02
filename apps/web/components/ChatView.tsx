@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import type { HistoryEntry, ToolKind } from "@honeybee-waggle/schema";
 import { useSessionView, useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { formatTokens } from "@/lib/format";
+import { ModeBadge } from "./ModeBadge";
 import { ToolCard } from "./ToolCard";
 
 type Item =
@@ -21,10 +22,12 @@ type Item =
       result?: { ok: boolean; output?: string };
       runEnded: boolean;
     }
+  | { type: "file"; key: string; path: string; change: "add" | "modify" | "delete" }
   | { type: "usage"; key: string; inputTokens?: number; outputTokens?: number; costUsd?: number }
   | { type: "end"; key: string; status: string; error?: string };
 
 const PERMISSION_LABEL = { "read-only": "읽기 전용", "workspace-write": "파일 수정 허용", full: "전체 허용" } as const;
+const CHANGE_LABEL = { add: "추가", modify: "수정", delete: "삭제" } as const;
 const END_LABEL: Record<string, string> = { error: "오류로 종료", cancelled: "중단됨", timeout: "시간 초과" };
 
 // 사용자가 위로 스크롤해서 예전 내용을 읽는 중이면 새 출력이 와도 끌어내리지 않는다.
@@ -61,6 +64,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           <h1 className="truncate font-semibold">{session.title || "(제목 없음)"}</h1>
           <p className="truncate font-mono text-xs text-neutral-500">{session.cwd}</p>
         </div>
+        <ModeBadge profileId={session.profileId} />
         <span className="shrink-0 rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700">
           {PERMISSION_LABEL[session.permission]}
         </span>
@@ -119,6 +123,12 @@ function ItemView({ item }: { item: Item }) {
     case "tool":
       return (
         <ToolCard kind={item.kind} name={item.name} input={item.input} result={item.result} runEnded={item.runEnded} />
+      );
+    case "file":
+      return (
+        <p className="font-mono text-xs text-neutral-500">
+          ✏️ {item.path} <span className="font-sans">({CHANGE_LABEL[item.change]})</span>
+        </p>
       );
     case "usage":
       return (
@@ -239,13 +249,16 @@ function toItems(entries: HistoryEntry[]): Item[] {
           runEnded: endedRuns.has(ev.runId),
         });
         break;
+      case "file.changed":
+        items.push({ type: "file", key, path: ev.path, change: ev.change });
+        break;
       case "usage":
         items.push({ type: "usage", key, inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, costUsd: ev.costUsd });
         break;
       case "run.completed":
         if (ev.status !== "success") items.push({ type: "end", key, status: ev.status, error: ev.error });
         break;
-      // run.started, tool.completed(카드에 합쳐짐), raw, file.changed(claude는 안 보냄)는 그리지 않는다.
+      // run.started, tool.completed(카드에 합쳐짐), raw는 그리지 않는다.
     }
   });
   return items;

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useWaggle } from "@/lib/WaggleProvider";
 import { formatRelative } from "@/lib/format";
+import { ModeBadge } from "./ModeBadge";
 
 const CONN_LABEL = { connecting: "연결 중…", open: "서버 연결됨", closed: "연결 끊김 · 재시도 중" } as const;
 const CONN_DOT = { connecting: "bg-amber-400", open: "bg-emerald-500", closed: "bg-red-500" } as const;
@@ -41,7 +42,8 @@ export function SessionSidebar() {
             >
               <div className="flex items-center gap-2">
                 {s.running && <span className="size-2 shrink-0 animate-pulse rounded-full bg-emerald-500" title="실행 중" />}
-                <span className="truncate">{s.title || "(제목 없음)"}</span>
+                <span className="min-w-0 flex-1 truncate">{s.title || "(제목 없음)"}</span>
+                <ModeBadge profileId={s.profileId} />
               </div>
               <div className="mt-0.5 truncate text-xs text-neutral-500">
                 {formatRelative(s.updatedAt)} · {s.cwd}
@@ -53,7 +55,15 @@ export function SessionSidebar() {
 
       <div className="flex items-center gap-2 border-t border-neutral-200 px-4 py-2 text-xs text-neutral-500 dark:border-neutral-800">
         <span className={`size-2 rounded-full ${CONN_DOT[conn]}`} />
-        {CONN_LABEL[conn]}
+        <span className="flex-1">{CONN_LABEL[conn]}</span>
+        <Link
+          href="/settings"
+          className={`rounded px-1.5 py-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-800 ${
+            pathname === "/settings" ? "bg-neutral-200 dark:bg-neutral-800" : ""
+          }`}
+        >
+          ⚙ 설정
+        </Link>
       </div>
     </aside>
   );
