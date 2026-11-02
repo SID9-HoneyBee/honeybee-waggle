@@ -1,4 +1,4 @@
-import type { AgentEvent, AuthMode, Engine, PermissionLevel } from "./agent-adapter-schema";
+import type { AgentEvent, AuthMode, Engine, PermissionLevel, Runtime } from "./agent-adapter-schema";
 
 // 서버 ↔ 웹 WebSocket 계약. 원본 스키마 파일은 수정하지 않기로 했으므로 별도 파일로 둔다.
 
@@ -10,11 +10,16 @@ export interface ProfileInfo {
   label: string;
   engine: Engine;
   auth: AuthMode;
+  /** agent = CLI 에이전트(작업 폴더·권한 필요), chat = API 직접 대화 */
+  runtime: Runtime;
   available: boolean;
   unavailableReason?: string;
   keyProvider?: KeyProvider;
   keyHint?: string;
-  /** CLI가 실제 비용을 보고하는지. false면 예산 상한을 걸 수 없다 (codex는 토큰만 보고) */
+  /** chat 프로필의 현재 모델과, 키로 조회한 선택 가능 모델 목록 */
+  model?: string;
+  modelOptions?: string[];
+  /** 비용을 계산할 수 있는지. false면 예산 상한을 걸 수 없다 (Claude API만 토큰×정가로 계산) */
   costTracked: boolean;
   budgetUsd?: number;
   /** 이번 달(서버 로컬 시간 기준) 누적 비용. api 모드만 */
@@ -59,6 +64,7 @@ export type ClientMessage = { reqId?: string } & (
   | { type: "settings.setKey"; provider: KeyProvider; key: string }
   | { type: "settings.deleteKey"; provider: KeyProvider }
   | { type: "settings.setBudget"; profileId: string; budgetUsd: number | null }
+  | { type: "settings.setModel"; profileId: string; model: string }
 );
 
 export type ServerMessage =

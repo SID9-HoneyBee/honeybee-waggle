@@ -1,4 +1,6 @@
 import type { EngineAdapter } from "@honeybee-waggle/schema";
+import { AnthropicChatAdapter } from "./adapters/chat/AnthropicChatAdapter";
+import { OpenAIChatAdapter } from "./adapters/chat/OpenAIChatAdapter";
 import { ClaudeCliAdapter } from "./adapters/claude-cli/ClaudeCliAdapter";
 import { resolveClaudeBin } from "./adapters/claude-cli/resolveClaudeBin";
 import { CodexCliAdapter } from "./adapters/codex-cli/CodexCliAdapter";
@@ -17,21 +19,33 @@ const codex = resolveCodexBin();
 const profiles = new ProfileService({ dataDir: config.dataDir, keyStore: new KeyStore(), claudeBin, codex });
 await profiles.init();
 
-const adapters = new Map<string, EngineAdapter>();
-for (const info of profiles.list()) {
-  const profile = profiles.get(info.id);
-  if (profile.engine === "claude" && claudeBin) {
-    adapters.set(profile.id, new ClaudeCliAdapter(profile, { claudeBin, resolveKey: profiles.resolveKey }));
-  } else if (profile.engine === "codex" && codex) {
-    adapters.set(profile.id, new CodexCliAdapter(profile, { codex, resolveKey: profiles.resolveKey }));
-  }
-}
-
 const store = new FileSessionStore(config.dataDir);
+const { resolveKey } = profiles;
+
+const adapters = new Map<string, EngineAdapter>();
+if (claudeBin) adapters.set("claude-sub", new ClaudeCliAdapter(profiles.get("claude-sub"), { claudeBin, resolveKey }));
+if (codex) adapters.set("codex-sub", new CodexCliAdapter(profiles.get("codex-sub"), { codex, resolveKey }));
+adapters.set(
+  "claude-api",
+  new AnthropicChatAdapter({
+    getProfile: () => profiles.get("claude-api"),
+    resolveKey,
+    loadHistory: (id) => store.readHistory(id),
+  }),
+);
+adapters.set(
+  "codex-api",
+  new OpenAIChatAdapter({
+    getProfile: () => profiles.get("codex-api"),
+    resolveKey,
+    filesDir: (id) => store.filesDir(id),
+  }),
+);
+
 const manager = new SessionManager(store, adapters, profiles);
 await manager.init();
 
-const wss = startWsServer(manager, profiles, config);
+const wss = startWsServer(manager, profiles, { ...config, filesDir: (id) => store.filesDir(id) });
 wss.on("listening", () => {
   console.log(`[waggle] ws://${config.host}:${config.port}`);
   console.log(`[waggle] claude: ${claudeBin ?? "(없음)"}`);

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { HistoryEntry, ToolKind } from "@honeybee-waggle/schema";
-import { useSessionView, useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
+import { FILES_BASE, useSessionView, useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { formatTokens } from "@/lib/format";
 import { ModeBadge } from "./ModeBadge";
 import { ToolCard } from "./ToolCard";
@@ -64,12 +64,17 @@ export function ChatView({ sessionId }: { sessionId: string }) {
       <header className="flex items-center gap-3 border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-semibold">{session.title || "(제목 없음)"}</h1>
-          <p className="truncate font-mono text-xs text-neutral-500">{session.cwd}</p>
+          <p className="truncate font-mono text-xs text-neutral-500">
+            {session.cwd || (profile?.model ? `API 대화 · ${profile.model}` : "API 대화")}
+          </p>
         </div>
         <ModeBadge profileId={session.profileId} />
-        <span className="shrink-0 rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700">
-          {PERMISSION_LABEL[session.permission]}
-        </span>
+        {/* API 대화 세션은 파일 권한이 의미 없어서 권한 배지를 숨긴다 */}
+        {profile?.runtime !== "chat" && (
+          <span className="shrink-0 rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700">
+            {PERMISSION_LABEL[session.permission]}
+          </span>
+        )}
       </header>
 
       <div
@@ -83,11 +88,14 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         <div className="mx-auto max-w-3xl space-y-3 px-5 py-6">
           {!view.loaded && <p className="text-sm text-neutral-500">기록 불러오는 중…</p>}
           {view.loaded && items.length === 0 && (
-            <p className="text-sm text-neutral-500">첫 메시지를 보내면 이 폴더에서 {profile ? `${CLI_NAME[profile.engine]}(${profile.label})` : "에이전트"}가
-              실행돼.</p>
+            <p className="text-sm text-neutral-500">
+              {profile?.runtime === "chat"
+                ? `첫 메시지를 보내면 ${profile.label}(${profile.model ?? "모델 미정"})와 대화가 시작돼. 파일이나 셸에는 접근하지 않아.`
+                : `첫 메시지를 보내면 이 폴더에서 ${profile ? `${CLI_NAME[profile.engine]}(${profile.label})` : "에이전트"}가 실행돼.`}
+            </p>
           )}
           {items.map((item) => (
-            <ItemView key={item.key} item={item} />
+            <ItemView key={item.key} item={item} sessionId={sessionId} />
           ))}
           {view.streaming && <Markdown text={view.streaming} />}
           {session.running && !view.streaming && (
@@ -109,7 +117,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   );
 }
 
-function ItemView({ item }: { item: Item }) {
+function ItemView({ item, sessionId }: { item: Item; sessionId: string }) {
   switch (item.type) {
     case "user":
       return (
@@ -128,6 +136,16 @@ function ItemView({ item }: { item: Item }) {
         <ToolCard kind={item.kind} name={item.name} input={item.input} result={item.result} runEnded={item.runEnded} />
       );
     case "file":
+      // API 대화에서 만든 이미지는 세션 폴더 기준 상대 경로(files/...)로 온다. CLI의 파일 변경은 절대 경로라 겹치지 않는다.
+      if (item.path.startsWith("files/") && /\.(png|jpg|webp)$/.test(item.path)) {
+        const src = `${FILES_BASE}/files/${sessionId}/${item.path.slice("files/".length)}`;
+        return (
+          <a href={src} target="_blank" rel="noreferrer" className="block w-fit">
+            {/* eslint-disable-next-line @next/next/no-img-element -- 로컬 서버가 주는 동적 파일이라 next/image 최적화 대상이 아니다 */}
+            <img src={src} alt="생성된 이미지" className="max-h-96 rounded-lg border border-neutral-200 dark:border-neutral-800" />
+          </a>
+        );
+      }
       return (
         <p className="font-mono text-xs text-neutral-500">
           ✏️ {item.path} <span className="font-sans">({CHANGE_LABEL[item.change]})</span>

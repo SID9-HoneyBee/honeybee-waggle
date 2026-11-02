@@ -49,6 +49,8 @@ export function NewSessionForm() {
   // 저장해둔 방식이 지금은 쓸 수 없을 수 있다(키 삭제 등). 그대로 두면 버튼만 막혀서 이유를 알기 어렵다.
   const selected = profiles.find((p) => p.id === profileId);
   const usable = selected?.available ?? false;
+  // API 대화는 파일에 손대지 않는다. 작업 폴더·권한을 받으면 의미 없는 입력을 강요하는 셈이라 숨긴다.
+  const isChat = selected?.runtime === "chat";
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -93,9 +95,9 @@ export function NewSessionForm() {
                 <ModeBadge profileId={p.id} />
                 <span className="block text-xs text-neutral-500">
                   {p.available
-                    ? p.auth === "api"
-                      ? "API 과금 · 키 " + (p.keyHint ?? "")
-                      : "구독 한도 사용"
+                    ? p.runtime === "chat"
+                      ? `API 대화 · ${p.model ?? ""}`
+                      : "에이전트 · 구독 한도 사용"
                     : p.unavailableReason}
                 </span>
               </span>
@@ -113,6 +115,7 @@ export function NewSessionForm() {
         )}
       </fieldset>
 
+      {!isChat && (
       <label className="block space-y-1">
         <span className="text-sm font-medium">작업 폴더 (cwd)</span>
         <input
@@ -123,6 +126,7 @@ export function NewSessionForm() {
           className="w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 font-mono text-sm dark:border-neutral-700"
         />
       </label>
+      )}
 
       <label className="block space-y-1">
         <span className="text-sm font-medium">
@@ -135,6 +139,7 @@ export function NewSessionForm() {
         />
       </label>
 
+      {!isChat && (
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-medium">권한</legend>
         {PERMISSIONS.map((p) => (
@@ -160,12 +165,13 @@ export function NewSessionForm() {
           </label>
         ))}
       </fieldset>
+      )}
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       <button
         type="submit"
-        disabled={!connected || busy || !cwd.trim() || !usable}
+        disabled={!connected || busy || (!isChat && !cwd.trim()) || !usable}
         className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
       >
         {connected ? "세션 만들기" : "서버 연결 대기 중…"}

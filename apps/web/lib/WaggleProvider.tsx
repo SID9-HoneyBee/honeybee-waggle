@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useState, useSyncExternalStore } 
 import { emptyView, WaggleClient, type Snapshot } from "./waggleClient";
 
 const WS_URL = process.env.NEXT_PUBLIC_WAGGLE_WS ?? "ws://127.0.0.1:4317";
+/** 생성 이미지 등 파일은 같은 서버의 HTTP 경로로 받는다 */
+export const FILES_BASE = WS_URL.replace(/^ws/, "http");
 
 const ClientContext = createContext<WaggleClient | null>(null);
 

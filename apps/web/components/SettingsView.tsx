@@ -7,12 +7,7 @@ import { ModeBadge } from "./ModeBadge";
 
 const PROVIDERS: { provider: KeyProvider; title: string; placeholder: string; note?: string }[] = [
   { provider: "anthropic", title: "Anthropic API 키 (Claude API)", placeholder: "sk-ant-..." },
-  {
-    provider: "openai",
-    title: "OpenAI API 키 (GPT API)",
-    placeholder: "sk-...",
-    note: "저장하면 전용 폴더에 codex 로그인까지 진행해서 몇 초 걸릴 수 있어.",
-  },
+  { provider: "openai", title: "OpenAI API 키 (GPT API)", placeholder: "sk-..." }
 ];
 
 export function SettingsView() {
@@ -26,7 +21,8 @@ export function SettingsView() {
       <section className="space-y-4">
         <h2 className="font-medium">API 키</h2>
         <p className="text-sm text-neutral-500">
-          키는 이 PC의 Windows 자격 증명 관리자에만 저장되고, 화면에는 끝 4자리만 다시 보여.
+          키는 이 PC의 Windows 자격 증명 관리자에만 저장되고, 화면에는 끝 4자리만 다시 보여. 저장할 때 모델 목록을
+          받아보면서 키가 맞는지 확인해.
         </p>
         {PROVIDERS.map((p) => (
           <KeyRow
@@ -36,6 +32,15 @@ export function SettingsView() {
             disabled={!connected}
           />
         ))}
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="font-medium">API 모델</h2>
+        {profiles
+          .filter((p) => p.runtime === "chat")
+          .map((p) => (
+            <ModelRow key={p.id} profile={p} disabled={!connected} />
+          ))}
       </section>
 
       <section className="space-y-4">
@@ -50,8 +55,8 @@ export function SettingsView() {
             <BudgetRow key={p.id} profile={p} disabled={!connected} />
           ))}
         <p className="text-xs text-neutral-500">
-          GPT API는 codex CLI가 비용을 알려주지 않아서 토큰 수만 보여주고 예산을 걸 수 없어. OpenAI 대시보드의 사용 한도를
-          같이 걸어두는 걸 추천해.
+          Claude API 비용은 토큰 수 × 정가로 계산한 값이라 할인·크레딧은 반영되지 않아. GPT API는 단가를 확인할 방법이
+          없어서 토큰 수만 보여주고 예산을 걸 수 없어. 각 콘솔(Anthropic / OpenAI)의 사용 한도도 같이 걸어두는 걸 추천해.
         </p>
       </section>
 
@@ -148,6 +153,40 @@ function KeyRow(props: {
       {message && (
         <p className={`text-xs ${message.ok ? "text-emerald-600" : "text-red-600 dark:text-red-400"}`}>{message.text}</p>
       )}
+    </div>
+  );
+}
+
+function ModelRow({ profile, disabled }: { profile: ProfileInfo; disabled: boolean }) {
+  const client = useWaggleClient();
+  const [error, setError] = useState<string>();
+  const options = profile.modelOptions ?? [];
+
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-neutral-200 p-4 text-sm dark:border-neutral-800">
+      <ModeBadge profileId={profile.id} />
+      {options.length > 0 ? (
+        <select
+          value={profile.model ?? ""}
+          disabled={disabled}
+          onChange={(e) => {
+            setError(undefined);
+            client.setModel(profile.id, e.target.value).catch((err: unknown) => {
+              setError(err instanceof Error ? err.message : String(err));
+            });
+          }}
+          className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-transparent px-2 py-1.5 font-mono dark:border-neutral-700 dark:bg-neutral-950"
+        >
+          {options.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="flex-1 text-neutral-500">{profile.keyHint ? "모델 목록 불러오는 중…" : "키를 등록하면 고를 수 있어"}</span>
+      )}
+      {error && <span className="text-xs text-red-600">{error}</span>}
     </div>
   );
 }

@@ -78,6 +78,11 @@ export class FileSessionStore {
     return entries;
   }
 
+  /** API 대화에서 생성된 이미지 등을 두는 폴더. 세션 폴더 안에 둬서 세션 삭제 때 같이 지워진다 */
+  filesDir(sessionId: string): string {
+    return path.join(this.dir(sessionId), "files");
+  }
+
   private dir(sessionId: string): string {
     if (!SESSION_ID.test(sessionId)) throw new Error(`잘못된 세션 ID: ${sessionId}`);
     return path.join(this.root, "sessions", sessionId);

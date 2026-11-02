@@ -69,10 +69,14 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
   }): Promise<SessionSummary> {
     this.profiles.assertCanRun(input.profileId);
     if (!this.adapters.has(input.profileId)) throw new Error(`아직 지원하지 않는 실행 방식: ${input.profileId}`);
-    const cwd = input.cwd.trim();
-    // 잘못된 cwd는 spawn 시점에야 ENOENT로 터지는데, 그때는 원인이 잘 안 보인다. 만들 때 미리 막는다.
-    const stat = await fs.stat(cwd).catch(() => undefined);
-    if (!stat?.isDirectory()) throw new Error(`작업 폴더가 없거나 폴더가 아님: ${cwd}`);
+    // API 대화(chat)는 파일에 손대지 않으므로 작업 폴더·권한이 의미 없다. 빈 값으로 저장해 화면에서도 숨긴다.
+    const isChat = this.profiles.get(input.profileId).runtime === "chat";
+    const cwd = isChat ? "" : input.cwd.trim();
+    if (!isChat) {
+      // 잘못된 cwd는 spawn 시점에야 ENOENT로 터지는데, 그때는 원인이 잘 안 보인다. 만들 때 미리 막는다.
+      const stat = await fs.stat(cwd).catch(() => undefined);
+      if (!stat?.isDirectory()) throw new Error(`작업 폴더가 없거나 폴더가 아님: ${cwd}`);
+    }
 
     const now = Date.now();
     const meta: SessionMeta = {
@@ -80,7 +84,7 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
       title: input.title?.trim() ?? "",
       profileId: input.profileId,
       cwd,
-      permission: input.permission,
+      permission: isChat ? "read-only" : input.permission,
       createdAt: now,
       updatedAt: now,
     };

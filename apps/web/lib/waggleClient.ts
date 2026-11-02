@@ -134,6 +134,10 @@ export class WaggleClient {
     await this.request({ type: "settings.deleteKey", provider });
   }
 
+  async setModel(profileId: string, model: string): Promise<void> {
+    await this.request({ type: "settings.setModel", profileId, model });
+  }
+
   async setBudget(profileId: string, budgetUsd: number | null): Promise<void> {
     await this.request({ type: "settings.setBudget", profileId, budgetUsd });
   }

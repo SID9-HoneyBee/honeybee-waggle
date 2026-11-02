@@ -1,3 +1,6 @@
+import { createReadStream, existsSync } from "node:fs";
+import http from "node:http";
+import path from "node:path";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import type { ClientMessage, ServerMessage } from "@honeybee-waggle/schema";
 import type { ProfileService } from "../profiles/ProfileService";
@@ -7,7 +10,12 @@ interface WsServerOptions {
   host: string;
   port: number;
   allowedOrigins: string[];
+  filesDir: (sessionId: string) => string;
 }
+
+// /files/<sessionId>/<파일명>. 두 부분 모두 엄격하게 제한해서 ../ 같은 경로 조작이 끼어들 틈을 없앤다.
+const FILE_ROUTE = /^\/files\/([0-9a-f-]{36})\/([A-Za-z0-9_-]+\.(png|jpg|webp))$/;
+const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" };
 
 /**
  * 세션 목록 변경(session.updated)은 모든 연결에 뿌리고,
@@ -19,11 +27,24 @@ export function startWsServer(
   profiles: ProfileService,
   opts: WsServerOptions,
 ): WebSocketServer {
+  // API 대화에서 생성한 이미지를 <img>로 띄우려면 HTTP 경로가 필요해서, WS를 HTTP 서버 위에 얹는다.
+  // 파일명이 API가 준 긴 ID라 추측할 수 없고 127.0.0.1에만 열려 있어서 별도 인증은 두지 않는다.
+  const server = http.createServer((req, res) => {
+    const m = req.method === "GET" ? FILE_ROUTE.exec(req.url ?? "") : null;
+    const file = m ? path.join(opts.filesDir(m[1]!), m[2]!) : undefined;
+    if (!m || !file || !existsSync(file)) {
+      res.writeHead(404).end();
+      return;
+    }
+    res.writeHead(200, { "Content-Type": MIME[m[3]!]!, "Cache-Control": "private, max-age=31536000, immutable" });
+    createReadStream(file).pipe(res);
+  });
   const wss = new WebSocketServer({
-    host: opts.host,
-    port: opts.port,
+    server,
     verifyClient: ({ origin }: { origin: string }) => opts.allowedOrigins.includes(origin),
   });
+  // 외부 server를 쓰면 ws가 server의 listening을 그대로 다시 내보내므로 여기서 따로 emit하지 않는다.
+  server.listen(opts.port, opts.host);
   const subscriptions = new Map<WebSocket, Set<string>>();
 
   manager.on("updated", (session) => {
@@ -98,6 +119,10 @@ export function startWsServer(
         return;
       case "settings.deleteKey":
         await profiles.deleteKey(msg.provider);
+        send(ws, { type: "ack", reqId: msg.reqId });
+        return;
+      case "settings.setModel":
+        await profiles.setModel(msg.profileId, msg.model);
         send(ws, { type: "ack", reqId: msg.reqId });
         return;
       case "settings.setBudget":
