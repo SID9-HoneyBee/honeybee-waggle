@@ -69,13 +69,18 @@ Open http://127.0.0.1:3000 in your browser.
 ### Security
 - The server listens on `127.0.0.1` only and rejects connections from other websites (Origin check). It does **not** block other programs running on the same machine. Use it only on a machine you trust.
 - The **"full access"** permission for subscription sessions lets the agent run shell commands without asking. Use it only when you really need it.
-- API usage is billed for real. **Set spending limits** in the Anthropic and OpenAI consoles. waggle cannot compute GPT API costs, so it cannot enforce a GPT budget.
+- API usage is billed for real. **Set spending limits** in the Anthropic and OpenAI consoles. waggle's monthly budget cap currently applies to the Claude API only.
 
-### Limitations
-- Single-user, local only. No remote access, no multi-user support.
-- **Tested on Windows only.** macOS/Linux may work but are untested.
-- Text file attachments only (no image attachments yet).
-- No automated tests. Treat it as a personal project.
+## Current version and what's next
+
+The current version is developed and used on Windows. The next updates aim to improve:
+
+- Mac compatibility checks and fixes
+- Attachments beyond text files, such as images
+- A monthly budget cap for the GPT API as well
+- A distribution package that makes installing and running easier
+
+The goal is to make choosing between subscription and API on your own machine, and carrying context across sessions, even smoother.
 
 ## Layout
 

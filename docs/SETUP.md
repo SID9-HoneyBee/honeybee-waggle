@@ -70,7 +70,7 @@ ChatGPT Plus/Pro 등 Codex를 쓸 수 있는 구독이 필요합니다.
 
 1. OpenAI Platform(https://platform.openai.com)에 로그인합니다.
 2. **결제·크레딧**을 확인합니다.
-3. **사용 한도를 설정**합니다. waggle은 GPT API 비용을 계산할 수 없어서, 예산 제한은 OpenAI 쪽 설정에만 의존합니다.
+3. **사용 한도를 설정**합니다. GPT API의 월 예산 상한은 다음 업데이트에서 지원할 예정이라, 지금은 OpenAI 쪽 한도 설정이 예산 관리 수단입니다.
 4. **API keys** 메뉴에서 새 키를 만들고 복사합니다.
 5. waggle의 **⚙ 설정 → API 키 → OpenAI API 키**에 붙여넣고 저장합니다.
 

@@ -72,7 +72,7 @@ Requires a ChatGPT plan that includes Codex (Plus, Pro, etc.).
 
 1. Sign in to the OpenAI Platform: https://platform.openai.com
 2. Check **billing / credits**.
-3. **Set usage limits.** waggle can't compute GPT API costs, so OpenAI's limits are your only budget control.
+3. **Set usage limits.** A monthly budget cap for the GPT API is planned for a future update, so for now OpenAI's limits are how you control spending.
 4. Create a key under **API keys** and copy it.
 5. Paste it into waggle under **⚙ 설정 (Settings) → API 키 → OpenAI API 키** and save.
 
