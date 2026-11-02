@@ -10,7 +10,7 @@ export const FILES_BASE = WS_URL.replace(/^ws/, "http");
 const ClientContext = createContext<WaggleClient | null>(null);
 
 // 서버 렌더 시점에는 연결이 없다. 고정된 빈 스냅샷을 줘야 hydration 불일치가 안 난다.
-const SERVER_SNAPSHOT: Snapshot = { conn: "connecting", sessions: [], profiles: [], views: {} };
+const SERVER_SNAPSHOT: Snapshot = { conn: "connecting", sessions: [], profiles: [], approvals: {}, views: {} };
 
 export function WaggleProvider({ children }: { children: React.ReactNode }) {
   const [client] = useState(() => new WaggleClient(WS_URL));

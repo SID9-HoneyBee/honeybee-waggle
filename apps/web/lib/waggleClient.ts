@@ -1,4 +1,6 @@
 import type {
+  ApprovalPolicy,
+  ApprovalRequest,
   ClientMessage,
   HistoryEntry,
   KeyProvider,
@@ -25,6 +27,8 @@ export interface Snapshot {
   conn: ConnState;
   sessions: SessionSummary[];
   profiles: ProfileInfo[];
+  /** 세션별 대기 중인 도구 승인 요청 */
+  approvals: Record<string, ApprovalRequest[]>;
   views: Record<string, SessionView>;
   notice?: { id: number; message: string };
 }
@@ -43,7 +47,7 @@ const RECONNECT_MAX_MS = 10_000;
  */
 export class WaggleClient {
   private ws?: WebSocket;
-  private snapshot: Snapshot = { conn: "connecting", sessions: [], profiles: [], views: {} };
+  private snapshot: Snapshot = { conn: "connecting", sessions: [], profiles: [], approvals: {}, views: {} };
   private readonly listeners = new Set<() => void>();
   // StrictMode에서 effect가 두 번 돌면 open/close가 짝으로 두 번 온다. 참조 수로 세야 구독이 끊기지 않는다.
   private readonly openCounts = new Map<string, number>();
@@ -73,7 +77,8 @@ export class WaggleClient {
 
     ws.onopen = () => {
       this.reconnectDelay = 1_000;
-      this.set({ conn: "open" });
+      // 끊긴 사이 처리된 승인 요청이 화면에 남지 않게 비운다. 아직 대기 중인 건 session.open 응답으로 다시 온다.
+      this.set({ conn: "open", approvals: {} });
       this.rawSend({ type: "session.list" });
       this.rawSend({ type: "profile.list" });
       // 재연결이면 서버 쪽 구독이 사라진 상태다. 열려 있던 세션을 다시 열어 그 사이 놓친 기록을 받는다.
@@ -126,6 +131,14 @@ export class WaggleClient {
 
   transcript(sessionId: string, includeTools: boolean): Promise<{ text: string; chars: number }> {
     return this.request({ type: "session.transcript", sessionId, includeTools }) as Promise<{ text: string; chars: number }>;
+  }
+
+  async setFolder(sessionId: string, folder: string | null, approval: ApprovalPolicy): Promise<void> {
+    await this.request({ type: "session.setFolder", sessionId, folder, approval });
+  }
+
+  respondApproval(sessionId: string, approvalId: string, approve: boolean): void {
+    this.rawSend({ type: "approval.respond", sessionId, approvalId, approve });
   }
 
   async renameSession(sessionId: string, title: string): Promise<void> {
@@ -187,6 +200,16 @@ export class WaggleClient {
       case "session.updated":
         this.upsertSession(msg.session);
         return;
+      case "approval.request": {
+        const list = (this.snapshot.approvals[msg.sessionId] ?? []).filter((a) => a.approvalId !== msg.request.approvalId);
+        this.set({ approvals: { ...this.snapshot.approvals, [msg.sessionId]: [...list, msg.request] } });
+        return;
+      }
+      case "approval.resolved": {
+        const list = (this.snapshot.approvals[msg.sessionId] ?? []).filter((a) => a.approvalId !== msg.approvalId);
+        this.set({ approvals: { ...this.snapshot.approvals, [msg.sessionId]: list } });
+        return;
+      }
       case "session.removed": {
         const { [msg.sessionId]: _removed, ...views } = this.snapshot.views;
         this.openCounts.delete(msg.sessionId);

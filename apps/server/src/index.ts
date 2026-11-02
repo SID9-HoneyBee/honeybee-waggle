@@ -10,6 +10,7 @@ import { KeyStore } from "./profiles/KeyStore";
 import { ProfileService } from "./profiles/ProfileService";
 import { SessionManager } from "./session/SessionManager";
 import { FileSessionStore } from "./store/FileSessionStore";
+import { ToolGateway } from "./tools/ToolGateway";
 import { startWsServer } from "./ws/server";
 
 // CLI 경로는 시작 시점에 확정한다. 한쪽 CLI가 없어도 서버는 뜨고, 해당 방식만 "사용 불가"로 표시된다.
@@ -21,6 +22,7 @@ await profiles.init();
 
 const store = new FileSessionStore(config.dataDir);
 const { resolveKey } = profiles;
+const tools = new ToolGateway();
 
 const adapters = new Map<string, EngineAdapter>();
 if (claudeBin) adapters.set("claude-sub", new ClaudeCliAdapter(profiles.get("claude-sub"), { claudeBin, resolveKey }));
@@ -31,6 +33,7 @@ adapters.set(
     getProfile: () => profiles.get("claude-api"),
     resolveKey,
     loadHistory: (id) => store.readHistory(id),
+    tools,
   }),
 );
 adapters.set(
@@ -39,13 +42,15 @@ adapters.set(
     getProfile: () => profiles.get("codex-api"),
     resolveKey,
     filesDir: (id) => store.filesDir(id),
+    tools,
   }),
 );
 
 const manager = new SessionManager(store, adapters, profiles);
 await manager.init();
+tools.bind((id) => manager.toolConfig(id));
 
-const wss = startWsServer(manager, profiles, { ...config, filesDir: (id) => store.filesDir(id) });
+const wss = startWsServer(manager, profiles, tools, { ...config, filesDir: (id) => store.filesDir(id) });
 wss.on("listening", () => {
   console.log(`[waggle] ws://${config.host}:${config.port}`);
   console.log(`[waggle] claude: ${claudeBin ?? "(없음)"}`);

@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
 import type {
   AgentEvent,
+  ApprovalPolicy,
   AttachedRef,
   FileAttachment,
   SessionRef,
@@ -111,6 +112,30 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
   async history(sessionId: string): Promise<HistoryEntry[]> {
     this.require(sessionId);
     return this.store.readHistory(sessionId);
+  }
+
+  /**
+   * API(chat) 세션에 폴더를 연결·해제한다. 실행 중에는 바꾸지 않는다.
+   * 도구 목록이 run 시작 시점에 정해지므로, 도중에 바꾸면 모델이 보는 도구와 실제 허용 범위가 어긋난다.
+   */
+  async setFolder(sessionId: string, folder: string | null, approval: ApprovalPolicy): Promise<void> {
+    const meta = this.require(sessionId);
+    if (this.profiles.get(meta.profileId).runtime !== "chat") throw new Error("폴더 연결은 API 세션에서만 쓸 수 있음 (구독 세션은 이미 작업 폴더에서 실행됨)");
+    if (this.running.has(sessionId)) throw new Error("실행 중에는 폴더를 바꿀 수 없음");
+    if (folder !== null) {
+      const stat = await fs.stat(folder.trim()).catch(() => undefined);
+      if (!stat?.isDirectory()) throw new Error(`폴더가 없거나 폴더가 아님: ${folder}`);
+    }
+    meta.cwd = folder?.trim() ?? "";
+    meta.approval = approval;
+    this.touch(meta);
+  }
+
+  /** ToolGateway가 도구 실행 시 묻는 세션 설정. 폴더가 없는 세션은 도구 자체가 없다 */
+  toolConfig(sessionId: string): { folder: string; approval: ApprovalPolicy } | undefined {
+    const meta = this.sessions.get(sessionId);
+    if (!meta?.cwd || this.profiles.get(meta.profileId).runtime !== "chat") return undefined;
+    return { folder: meta.cwd, approval: meta.approval ?? "writes" };
   }
 
   rename(sessionId: string, title: string): void {

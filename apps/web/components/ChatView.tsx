@@ -8,6 +8,8 @@ import { useDialog } from "@/lib/dialog";
 import { FILES_BASE, useSessionView, useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { MAX_FILES, MAX_TOTAL_FILE_CHARS, readTextFiles } from "@/lib/files";
 import { approxTokens, formatTokens } from "@/lib/format";
+import { ApprovalPanel } from "./ApprovalPanel";
+import { APPROVAL_LABEL, FolderConnect } from "./FolderConnect";
 import { ModeBadge } from "./ModeBadge";
 import { RefPicker } from "./RefPicker";
 import { ToolCard } from "./ToolCard";
@@ -43,6 +45,8 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const view = useSessionView(sessionId);
   const session = useWaggle((s) => s.sessions.find((x) => x.id === sessionId));
   const profile = useWaggle((s) => s.profiles.find((p) => p.id === session?.profileId));
+  const [folderOpen, setFolderOpen] = useState(false);
+  const isChat = profile?.runtime === "chat";
   const connected = useWaggle((s) => s.conn === "open");
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -69,17 +73,29 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-semibold">{session.title || "(제목 없음)"}</h1>
           <p className="truncate font-mono text-xs text-neutral-500">
-            {session.cwd || (profile?.model ? `API 대화 · ${profile.model}` : "API 대화")}
+            {isChat
+              ? `API 대화 · ${profile?.model ?? ""}${session.cwd ? ` · 📁 ${session.cwd}` : ""}`
+              : session.cwd}
           </p>
         </div>
         <ModeBadge profileId={session.profileId} />
-        {/* API 대화 세션은 파일 권한이 의미 없어서 권한 배지를 숨긴다 */}
-        {profile?.runtime !== "chat" && (
+        {/* API 세션은 CLI 권한 대신 폴더 연결·승인 방식을 보여준다 */}
+        {isChat ? (
+          <button
+            onClick={() => setFolderOpen(true)}
+            disabled={session.running}
+            title={session.running ? "실행 중에는 바꿀 수 없어" : undefined}
+            className="shrink-0 rounded-full border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            {session.cwd ? `📁 ${APPROVAL_LABEL[session.approval ?? "writes"]}` : "📁 폴더 연결"}
+          </button>
+        ) : (
           <span className="shrink-0 rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700">
             {PERMISSION_LABEL[session.permission]}
           </span>
         )}
       </header>
+      {folderOpen && <FolderConnect session={session} onClose={() => setFolderOpen(false)} />}
 
       <div
         ref={scrollRef}
@@ -262,6 +278,7 @@ function Composer(props: {
 
   return (
     <div className="border-t border-neutral-200 p-4 dark:border-neutral-800">
+      <ApprovalPanel sessionId={props.sessionId} />
       {picking && (
         <RefPicker
           currentSessionId={props.sessionId}

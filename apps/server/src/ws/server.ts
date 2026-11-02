@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket, type RawData } from "ws";
 import type { ClientMessage, ServerMessage } from "@honeybee-waggle/schema";
 import type { ProfileService } from "../profiles/ProfileService";
 import type { SessionManager } from "../session/SessionManager";
+import type { ToolGateway } from "../tools/ToolGateway";
 
 interface WsServerOptions {
   host: string;
@@ -25,6 +26,7 @@ const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp
 export function startWsServer(
   manager: SessionManager,
   profiles: ProfileService,
+  tools: ToolGateway,
   opts: WsServerOptions,
 ): WebSocketServer {
   // API 대화에서 생성한 이미지를 <img>로 띄우려면 HTTP 경로가 필요해서, WS를 HTTP 서버 위에 얹는다.
@@ -61,6 +63,12 @@ export function startWsServer(
       send(ws, { type: "session.removed", sessionId });
     }
   });
+  // 승인 요청은 그 세션을 열어둔 화면에만 보낸다. 여러 탭에서 열어뒀으면 어느 탭에서 답해도 된다.
+  const toSubscribers = (sessionId: string, msg: ServerMessage) => {
+    for (const [ws, subs] of subscriptions) if (subs.has(sessionId)) send(ws, msg);
+  };
+  tools.on("request", (sessionId, request) => toSubscribers(sessionId, { type: "approval.request", sessionId, request }));
+  tools.on("resolved", (sessionId, approvalId) => toSubscribers(sessionId, { type: "approval.resolved", sessionId, approvalId }));
   manager.on("entry", (sessionId, entry) => {
     for (const [ws, subs] of subscriptions) {
       if (subs.has(sessionId)) send(ws, { type: "session.entry", sessionId, entry });
@@ -95,10 +103,21 @@ export function startWsServer(
         subscriptions.get(ws)?.add(msg.sessionId);
         const entries = await manager.history(msg.sessionId);
         send(ws, { type: "session.history", sessionId: msg.sessionId, entries });
+        // 화면을 새로 열었을 때도 대기 중인 승인이 보여야 한다. 안 그러면 run이 승인 대기에서 멈춘 채로 남는다.
+        for (const request of tools.pendingFor(msg.sessionId)) {
+          send(ws, { type: "approval.request", sessionId: msg.sessionId, request });
+        }
         return;
       }
       case "session.close":
         subscriptions.get(ws)?.delete(msg.sessionId);
+        return;
+      case "session.setFolder":
+        await manager.setFolder(msg.sessionId, msg.folder, msg.approval);
+        send(ws, { type: "ack", reqId: msg.reqId });
+        return;
+      case "approval.respond":
+        tools.respond(msg.sessionId, msg.approvalId, msg.approve);
         return;
       case "session.rename":
         manager.rename(msg.sessionId, msg.title);

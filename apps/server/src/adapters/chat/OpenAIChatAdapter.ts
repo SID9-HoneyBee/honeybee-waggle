@@ -2,23 +2,26 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import OpenAI from "openai";
 import type { AdapterCapabilities, AgentEvent, BackendProfile, EngineAdapter, RunRequest } from "@honeybee-waggle/schema";
+import type { ToolGateway } from "../../tools/ToolGateway";
+import { folderInstructions, MAX_TOOL_TURNS, toolKindOf } from "./chatTools";
 
 interface OpenAIChatAdapterOptions {
   /** 설정 화면에서 모델이 바뀌면 다음 run부터 반영되도록 매번 다시 받는다 */
   getProfile: () => BackendProfile;
   resolveKey: (ref: string) => string;
   filesDir: (sessionId: string) => string;
+  tools: ToolGateway;
 }
 
 /**
- * OpenAI Responses API로 직접 대화한다 (runtime "chat"). 이미지 생성 도구를 켜둔다.
- * 대화 이어가기는 previous_response_id로 처리한다. OpenAI가 이전 응답(생성한 이미지 포함)을 서버에 보관하므로
+ * OpenAI Responses API로 직접 대화한다 (runtime "chat"). 이미지 생성은 항상, 폴더가 연결되면 파일 도구도 준다.
+ * 대화 이어가기는 previous_response_id로 처리한다. OpenAI가 이전 응답(생성 이미지·도구 호출 포함)을 서버에 보관하므로
  * Anthropic처럼 기록을 다시 보낼 필요가 없고, nativeSessionId에 마지막 response id를 담는다.
  */
 export class OpenAIChatAdapter implements EngineAdapter {
   readonly capabilities: AdapterCapabilities = {
-    tools: false,
-    fileEdits: false,
+    tools: true,
+    fileEdits: true,
     resume: true,
     partialStreaming: true,
     reportsCost: false,
@@ -34,86 +37,123 @@ export class OpenAIChatAdapter implements EngineAdapter {
     const profile = this.profile;
     const runId = req.runId;
     const model = profile.model;
-    yield { type: "run.started", runId, ts: Date.now(), engine: "codex", auth: profile.auth, runtime: "chat", model };
+    const now = () => Date.now();
+    yield { type: "run.started", runId, ts: now(), engine: "codex", auth: profile.auth, runtime: "chat", model };
 
     try {
       if (!model) throw new Error("모델이 정해지지 않음. 설정에서 모델 목록을 확인해줘.");
       const client = new OpenAI({ apiKey: this.opts.resolveKey(profile.apiKeyRef!) });
-      const stream = await client.responses.create(
-        {
-          model,
-          input: req.prompt,
-          // GPT API가 codex CLI 방식이던 때 만든 세션은 codex thread ID를 들고 있다. 그걸 보내면 404라서 resp_ 형식만 이어받는다.
-          previous_response_id: req.resumeNativeId?.startsWith("resp_") ? req.resumeNativeId : undefined,
-          tools: [{ type: "image_generation" }],
-          stream: true,
-        },
-        { signal },
-      );
+      const folder = this.opts.tools.folderOf(req.sessionId);
+      const tools: OpenAI.Responses.Tool[] = [
+        { type: "image_generation" },
+        ...this.opts.tools.toolsFor(req.sessionId).map(
+          (t): OpenAI.Responses.FunctionTool => ({
+            type: "function",
+            name: t.name,
+            description: t.description,
+            parameters: t.schema,
+            // strict는 모든 속성을 required로 요구해서 선택 인자(start_line 등)를 못 쓴다. 인자 검증은 서버 도구 쪽에서 한다.
+            strict: false,
+          }),
+        ),
+      ];
 
-      for await (const ev of stream) {
-        switch (ev.type) {
-          case "response.output_text.delta":
-            yield { type: "message.delta", runId, ts: Date.now(), text: ev.delta };
-            break;
-          case "response.output_item.added":
-            if (ev.item.type === "image_generation_call") {
-              yield {
-                type: "tool.started",
-                runId,
-                ts: Date.now(),
-                toolCallId: ev.item.id,
-                kind: "other",
-                name: "image_generation",
-                input: {},
-              };
+      // GPT API가 codex CLI 방식이던 때 만든 세션은 codex thread ID를 들고 있다. 그걸 보내면 404라서 resp_ 형식만 이어받는다.
+      let previous = req.resumeNativeId?.startsWith("resp_") ? req.resumeNativeId : undefined;
+      let input: string | OpenAI.Responses.ResponseInputItem[] = req.prompt;
+
+      for (let turn = 0; ; turn++) {
+        const stream = await client.responses.create(
+          {
+            model,
+            input,
+            previous_response_id: previous,
+            tools,
+            ...(folder ? { instructions: folderInstructions(folder) } : {}),
+            stream: true,
+          },
+          { signal },
+        );
+
+        const calls: OpenAI.Responses.ResponseFunctionToolCall[] = [];
+        let completedId: string | undefined;
+        for await (const ev of stream) {
+          switch (ev.type) {
+            case "response.output_text.delta":
+              yield { type: "message.delta", runId, ts: now(), text: ev.delta };
+              break;
+            case "response.output_item.added":
+              if (ev.item.type === "image_generation_call") {
+                yield { type: "tool.started", runId, ts: now(), toolCallId: ev.item.id, kind: "other", name: "image_generation", input: {} };
+              }
+              break;
+            case "response.output_item.done": {
+              const item = ev.item;
+              if (item.type === "message") {
+                const text = item.content.map((c) => (c.type === "output_text" ? c.text : "")).join("");
+                if (text) yield { type: "message.completed", runId, ts: now(), text };
+              } else if (item.type === "reasoning") {
+                const text = (item.summary ?? []).map((s) => s.text).join("\n");
+                if (text) yield { type: "reasoning", runId, ts: now(), text };
+              } else if (item.type === "image_generation_call") {
+                yield* this.saveImage(req.sessionId, runId, item);
+              } else if (item.type === "function_call") {
+                calls.push(item);
+                yield {
+                  type: "tool.started",
+                  runId,
+                  ts: now(),
+                  toolCallId: item.call_id,
+                  kind: toolKindOf(item.name),
+                  name: item.name,
+                  input: parseArgs(item.arguments),
+                };
+              }
+              break;
             }
-            break;
-          case "response.output_item.done": {
-            const item = ev.item;
-            if (item.type === "message") {
-              const text = item.content.map((c) => (c.type === "output_text" ? c.text : "")).join("");
-              if (text) yield { type: "message.completed", runId, ts: Date.now(), text };
-            } else if (item.type === "reasoning") {
-              const text = (item.summary ?? []).map((s) => s.text).join("\n");
-              if (text) yield { type: "reasoning", runId, ts: Date.now(), text };
-            } else if (item.type === "image_generation_call") {
-              yield* this.saveImage(req.sessionId, runId, item);
-            }
-            break;
-          }
-          case "response.completed": {
-            const u = ev.response.usage;
-            yield {
-              type: "usage",
-              runId,
-              ts: Date.now(),
-              inputTokens: u?.input_tokens,
-              outputTokens: u?.output_tokens,
+            case "response.completed": {
+              const u = ev.response.usage;
               // Responses API는 비용을 주지 않는다. 단가표를 유지할 근거가 없어 토큰만 보여준다.
-              costUsd: undefined,
-            };
-            yield { type: "run.completed", runId, ts: Date.now(), status: "success", nativeSessionId: ev.response.id };
-            return;
+              yield { type: "usage", runId, ts: now(), inputTokens: u?.input_tokens, outputTokens: u?.output_tokens, costUsd: undefined };
+              completedId = ev.response.id;
+              break;
+            }
+            case "response.failed":
+              yield { type: "run.completed", runId, ts: now(), status: "error", error: ev.response.error?.message ?? "응답 생성 실패" };
+              return;
+            case "error":
+              yield { type: "run.completed", runId, ts: now(), status: "error", error: ev.message };
+              return;
           }
-          case "response.failed":
-            yield {
-              type: "run.completed",
-              runId,
-              ts: Date.now(),
-              status: "error",
-              error: ev.response.error?.message ?? "응답 생성 실패",
-            };
-            return;
-          case "error":
-            yield { type: "run.completed", runId, ts: Date.now(), status: "error", error: ev.message };
-            return;
         }
+
+        if (!completedId) {
+          yield { type: "run.completed", runId, ts: now(), status: "error", error: "응답이 완료 이벤트 없이 끝남" };
+          return;
+        }
+        previous = completedId;
+        if (calls.length === 0) {
+          yield { type: "run.completed", runId, ts: now(), status: "success", nativeSessionId: completedId };
+          return;
+        }
+        if (turn + 1 >= MAX_TOOL_TURNS) {
+          // 도구 결과를 돌려주지 못한 응답 ID로 이어가면 다음 턴이 400이 난다. 마지막 정상 지점을 남기지 않는다.
+          yield { type: "run.completed", runId, ts: now(), status: "error", error: `도구 사용이 ${MAX_TOOL_TURNS}번을 넘어 중단함` };
+          return;
+        }
+
+        const outputs: OpenAI.Responses.ResponseInputItem[] = [];
+        for (const call of calls) {
+          const r = await this.opts.tools.execute(req.sessionId, runId, call.call_id, call.name, parseArgs(call.arguments), signal);
+          yield { type: "tool.completed", runId, ts: now(), toolCallId: call.call_id, ok: r.ok, output: r.output };
+          outputs.push({ type: "function_call_output", call_id: call.call_id, output: r.ok ? r.output : `오류: ${r.output}` });
+        }
+        if (signal.aborted) throw new Error("aborted");
+        input = outputs;
       }
-      yield { type: "run.completed", runId, ts: Date.now(), status: "error", error: "응답이 완료 이벤트 없이 끝남" };
     } catch (err) {
       if (signal.aborted) {
-        yield { type: "run.completed", runId, ts: Date.now(), status: "cancelled" };
+        yield { type: "run.completed", runId, ts: now(), status: "cancelled" };
         return;
       }
       const message =
@@ -124,7 +164,7 @@ export class OpenAIChatAdapter implements EngineAdapter {
             : err instanceof Error
               ? err.message
               : String(err);
-      yield { type: "run.completed", runId, ts: Date.now(), status: "error", error: message };
+      yield { type: "run.completed", runId, ts: now(), status: "error", error: message };
     }
   }
 
@@ -147,14 +187,17 @@ export class OpenAIChatAdapter implements EngineAdapter {
     const dir = this.opts.filesDir(sessionId);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, name), Buffer.from(item.result, "base64"));
-    yield {
-      type: "tool.completed",
-      runId,
-      ts: Date.now(),
-      toolCallId: item.id,
-      ok: true,
-      output: item.revised_prompt ?? undefined,
-    };
+    yield { type: "tool.completed", runId, ts: Date.now(), toolCallId: item.id, ok: true, output: item.revised_prompt ?? undefined };
     yield { type: "file.changed", runId, ts: Date.now(), path: `files/${name}`, change: "add" };
+  }
+}
+
+// 모델이 깨진 JSON을 보낼 수 있다. 예외로 run을 죽이지 않고 빈 인자로 넘겨서 도구 쪽 검증 오류로 돌려준다.
+function parseArgs(args: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(args) as unknown;
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
   }
 }

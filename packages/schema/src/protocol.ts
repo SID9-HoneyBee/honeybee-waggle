@@ -26,12 +26,36 @@ export interface ProfileInfo {
   spentUsd?: number;
 }
 
+/**
+ * API 세션 폴더 도구의 승인 방식.
+ * writes = 수정만 확인(기본), all = 읽기 포함 매번 확인, none = 모두 자동
+ */
+export type ApprovalPolicy = "writes" | "all" | "none";
+
+/** 서버가 도구 실행 직전에 멈추고 사용자에게 묻는 요청 */
+export interface ApprovalRequest {
+  approvalId: string;
+  runId: string;
+  toolCallId: string;
+  tool: string;
+  action: "list" | "read" | "write";
+  /** 연결 폴더 기준 상대 경로 */
+  path: string;
+  /** 수정 요청일 때 변경 내용 (unified diff) */
+  diff?: string;
+}
+
 export interface SessionMeta {
   id: string;
   title: string;
   profileId: string;
   cwd: string;
   permission: PermissionLevel;
+  /**
+   * API(chat) 세션에서는 cwd가 "연결된 폴더"다 (빈 값이면 파일 도구 없음).
+   * approval은 그 폴더 도구의 승인 방식이며 chat 세션에서만 쓴다.
+   */
+  approval?: ApprovalPolicy;
   /** 다음 run에서 --resume으로 넘길 값. run마다 엔진이 돌려준 최신 값으로 갱신된다 */
   nativeSessionId?: string;
   createdAt: number;
@@ -93,6 +117,8 @@ export type ClientMessage = { reqId?: string } & (
   | { type: "session.close"; sessionId: string }
   | { type: "session.delete"; sessionId: string }
   | { type: "session.rename"; sessionId: string; title: string }
+  | { type: "session.setFolder"; sessionId: string; folder: string | null; approval: ApprovalPolicy }
+  | { type: "approval.respond"; sessionId: string; approvalId: string; approve: boolean }
   | { type: "run.send"; sessionId: string; text: string; refs?: SessionRef[]; files?: FileAttachment[] }
   | { type: "session.transcript"; sessionId: string; includeTools: boolean }
   | { type: "run.cancel"; sessionId: string }
@@ -110,6 +136,8 @@ export type ServerMessage =
   | { type: "session.created"; reqId?: string; session: SessionSummary }
   | { type: "session.updated"; session: SessionSummary }
   | { type: "session.removed"; sessionId: string }
+  | { type: "approval.request"; sessionId: string; request: ApprovalRequest }
+  | { type: "approval.resolved"; sessionId: string; approvalId: string }
   | { type: "session.history"; sessionId: string; entries: HistoryEntry[] }
   | { type: "session.transcript"; reqId?: string; sessionId: string; text: string; chars: number }
   | { type: "session.entry"; sessionId: string; entry: HistoryEntry }
