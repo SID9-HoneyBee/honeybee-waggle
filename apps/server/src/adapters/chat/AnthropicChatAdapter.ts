@@ -19,6 +19,8 @@ interface AnthropicChatAdapterOptions {
   resolveKey: (ref: string) => string;
   loadHistory: (sessionId: string) => Promise<HistoryEntry[]>;
   tools: ToolGateway;
+  /** 예산을 넘었으면 이유를 돌려준다. 도구 루프에서 API를 다시 부르기 전에 확인한다 */
+  budgetExceeded: () => string | undefined;
 }
 
 /**
@@ -156,6 +158,13 @@ export class AnthropicChatAdapter implements EngineAdapter {
         yield { type: "raw", runId, ts: now(), engine: "claude", payload: { kind: TOOL_RESULTS_RECORD, ids: toolUses.map((u) => u.id) } };
         if (signal.aborted) {
           yield { type: "run.completed", runId, ts: now(), status: "cancelled" };
+          return;
+        }
+        // 도구 루프는 메시지 하나에 API를 여러 번 부른다. 시작 때만 검사하면 그 사이 예산을 크게 넘을 수 있어서
+        // 다음 호출 전에 다시 본다. 도구 결과는 위에서 기록했으므로 예산을 조정한 뒤 다음 메시지로 이어갈 수 있다.
+        const over = this.opts.budgetExceeded();
+        if (over) {
+          yield { type: "run.completed", runId, ts: now(), status: "error", error: `${over} (도구 작업 중간에 멈춤)` };
           return;
         }
       }

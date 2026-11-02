@@ -34,6 +34,7 @@ adapters.set(
     resolveKey,
     loadHistory: (id) => store.readHistory(id),
     tools,
+    budgetExceeded: () => profiles.budgetExceeded("claude-api"),
   }),
 );
 adapters.set(
@@ -44,6 +45,7 @@ adapters.set(
     filesDir: (id) => store.filesDir(id),
     loadHistory: (id) => store.readHistory(id),
     tools,
+    budgetExceeded: () => profiles.budgetExceeded("codex-api"),
   }),
 );
 

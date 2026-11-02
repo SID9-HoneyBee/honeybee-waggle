@@ -100,12 +100,19 @@ export class ProfileService extends EventEmitter<{ changed: [] }> {
     const def = this.def(profileId);
     const reason = this.unavailableReason(def);
     if (reason) throw new Error(`${def.label}: ${reason}`);
+    const over = this.budgetExceeded(profileId);
+    if (over) throw new Error(over);
+  }
+
+  /**
+   * 이번 달 예산을 넘었으면 이유를, 아니면 undefined. run 시작 때뿐 아니라 도구 루프 안에서 API를 다시 부르기 전에도 쓴다.
+   * 그래도 응답 하나·동시에 도는 다른 run만큼은 넘을 수 있어서, 하드 리밋이 아니라 1차 안전장치 수준이다.
+   */
+  budgetExceeded(profileId: string): string | undefined {
     const budget = this.settings.budgets[profileId];
     const spent = this.spent(profileId);
-    // run 시작 전에만 검사하므로 동시에 여러 run이 돌면 상한을 조금 넘길 수 있다. 하드 리밋이 아니라 안전장치 수준.
-    if (budget !== undefined && spent >= budget) {
-      throw new Error(`${def.label} 이번 달 예산 초과 ($${spent.toFixed(2)} / $${budget}). 설정에서 예산을 조정해줘.`);
-    }
+    if (budget === undefined || spent < budget) return undefined;
+    return `${this.label(profileId)} 이번 달 예산 초과 ($${spent.toFixed(2)} / $${budget}). 설정에서 예산을 조정해줘.`;
   }
 
   async setKey(provider: KeyProvider, rawKey: string): Promise<void> {

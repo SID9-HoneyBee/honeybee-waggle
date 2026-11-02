@@ -47,8 +47,8 @@ export function SettingsView() {
       <section className="space-y-4">
         <h2 className="font-medium">월 예산</h2>
         <p className="text-sm text-neutral-500">
-          이번 달 누적 비용이 예산에 닿으면 새 실행을 막아. 비워두면 제한 없이 표시만 해. 실행 중인 작업은 끝까지 가니까
-          약간 넘을 수 있어.
+          이번 달 누적 비용이 예산에 닿으면 새 실행을 막고, 파일 작업 중이면 다음 API 호출 전에 멈춰. 비워두면 제한 없이
+          표시만 해. 진행 중인 응답 하나나 동시에 돌던 다른 세션만큼은 약간 넘을 수 있어.
         </p>
         {profiles
           .filter((p) => p.costTracked)
@@ -56,8 +56,9 @@ export function SettingsView() {
             <BudgetRow key={p.id} profile={p} disabled={!connected} />
           ))}
         <p className="text-xs text-neutral-500">
-          Claude API 비용은 토큰 수 × 정가로 계산한 값이라 할인·크레딧은 반영되지 않아. GPT API는 단가를 확인할 방법이
-          없어서 토큰 수만 보여주고 예산을 걸 수 없어. 각 콘솔(Anthropic / OpenAI)의 사용 한도도 같이 걸어두는 걸 추천해.
+          Claude API 비용은 토큰 수 × 정가로 계산한 값이라 할인·크레딧은 반영되지 않아. 단가를 모르는 모델이 답하면
+          Opus 최고 단가로 넉넉하게 잡아. GPT API 예산은 다음 업데이트에서 지원할 예정이라 지금은 토큰 수만 보여줘. 각
+          콘솔(Anthropic / OpenAI)의 사용 한도도 같이 걸어두는 걸 추천해.
         </p>
       </section>
 

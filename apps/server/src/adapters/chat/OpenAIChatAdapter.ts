@@ -13,6 +13,8 @@ interface OpenAIChatAdapterOptions {
   filesDir: (sessionId: string) => string;
   loadHistory: (sessionId: string) => Promise<HistoryEntry[]>;
   tools: ToolGateway;
+  /** 예산을 넘었으면 이유를 돌려준다. 지금은 GPT 예산을 걸 수 없어 항상 통과하지만, 예산 지원 시 그대로 동작하도록 같은 지점에 둔다 */
+  budgetExceeded: () => string | undefined;
 }
 
 /** 이어가기 지점(응답 ID)과 그 응답에 아직 못 보낸 도구 결과를 기록하는 raw 이벤트의 표식 */
@@ -176,6 +178,12 @@ export class OpenAIChatAdapter implements EngineAdapter {
         }
         if (signal.aborted) {
           yield* finish("cancelled");
+          return;
+        }
+        // 못 보낸 도구 결과(pending)는 finish가 기록하므로 예산을 조정한 뒤 다음 메시지에서 이어진다.
+        const over = this.opts.budgetExceeded();
+        if (over) {
+          yield* finish("error", `${over} (도구 작업 중간에 멈춤)`);
           return;
         }
       }

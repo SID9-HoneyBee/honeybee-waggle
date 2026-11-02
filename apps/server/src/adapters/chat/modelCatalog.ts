@@ -33,7 +33,6 @@ export function defaultModel(provider: KeyProvider, available: string[]): string
 /**
  * 정가 기준 비용 계산용 단가 (USD / 100만 토큰, claude-api 스킬 2026-10-06 기준).
  * Anthropic API는 응답에 비용을 주지 않아서 토큰 수로 계산한다. 할인·크레딧은 반영되지 않는다.
- * 표에 없는 모델(서버 측 fallback으로 바뀐 경우 등)은 비용을 비워 예산 계산에서 빠진다.
  */
 const ANTHROPIC_PRICES: Record<string, { input: number; output: number; cacheWrite: number; cacheRead: number }> = {
   "claude-opus-5-5": { input: 4, output: 20, cacheWrite: 5, cacheRead: 0.2 },
@@ -43,12 +42,17 @@ const ANTHROPIC_PRICES: Record<string, { input: number; output: number; cacheWri
   "claude-fable-5-1": { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 0.25 },
 };
 
+/**
+ * 표에 없는 모델(서버 측 fallback으로 바뀐 경우, 새 모델 등)은 비용을 비우지 않고 Opus 계열 최고 단가로 넉넉하게 잡는다.
+ * 비우면 누적 비용이 실제보다 적게 잡혀 예산 상한이 늦게 걸린다. 많이 잡히는 쪽이 예산 용도에선 안전하다.
+ */
+const UNKNOWN_MODEL_PRICE = ANTHROPIC_PRICES["claude-opus-4-8"]!;
+
 export function anthropicCost(
   model: string,
   u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null },
-): number | undefined {
-  const p = ANTHROPIC_PRICES[model];
-  if (!p) return undefined;
+): number {
+  const p = ANTHROPIC_PRICES[model] ?? UNKNOWN_MODEL_PRICE;
   return (
     (u.input_tokens * p.input +
       u.output_tokens * p.output +

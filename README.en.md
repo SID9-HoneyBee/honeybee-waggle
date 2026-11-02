@@ -47,7 +47,11 @@ The goal: keep the subscriptions and the credits both working.
 - 📄 Attach text files
 - API keys live in the OS credential store (Windows Credential Manager). Only the last 4 characters are ever shown.
 - Pick models from the list your account can actually use.
-- Monthly budget cap for the Claude API (computed as tokens × list price)
+- Monthly budget cap for the Claude API
+  - Once this month's spend reaches the budget, new messages and new sessions are blocked.
+  - When a single message calls the API many times (for example, folder work), waggle **re-checks before each next call and stops right there** if the budget is exceeded. File work already done stays recorded, so you can continue after adjusting the budget.
+  - Cost is computed as tokens × list price. If a model with an unknown price answers, it's counted at the highest Opus price, so spend is never under-counted.
+  - One in-flight response, or another session running at the same time, can still push slightly past the cap. Use it together with your console spending limits.
 - Rename/delete sessions, conversation history stored locally (survives server restarts)
 
 ![Settings](docs/images/settings.png)
