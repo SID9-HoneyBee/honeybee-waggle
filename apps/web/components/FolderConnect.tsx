@@ -79,7 +79,7 @@ export function FolderConnect({ session, onClose }: { session: SessionSummary; o
             required
             value={folder}
             onChange={(e) => setFolder(e.target.value)}
-            placeholder="D:\00. SID9\03. Project\..."
+            placeholder="C:\Projects\my-app"
             className="w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 font-mono text-sm dark:border-neutral-700"
           />
         </label>

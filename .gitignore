@@ -8,7 +8,9 @@ dist/
 .data/
 
 .env*
-.claude/settings.local.json
+# Claude Code 작업 문서·설정은 로컬 전용 (공개 저장소에 올리지 않음)
+.claude/
+/CLAUDE.md
 
 # Next가 자동 생성
 next-env.d.ts
