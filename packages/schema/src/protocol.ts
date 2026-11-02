@@ -1,6 +1,25 @@
-import type { AgentEvent, PermissionLevel } from "./agent-adapter-schema";
+import type { AgentEvent, AuthMode, Engine, PermissionLevel } from "./agent-adapter-schema";
 
 // 서버 ↔ 웹 WebSocket 계약. 원본 스키마 파일은 수정하지 않기로 했으므로 별도 파일로 둔다.
+
+export type KeyProvider = "anthropic" | "openai";
+
+/** 웹에 보여주는 프로필 상태. 키 원문은 절대 담지 않는다 (keyHint는 끝 4자리) */
+export interface ProfileInfo {
+  id: string;
+  label: string;
+  engine: Engine;
+  auth: AuthMode;
+  available: boolean;
+  unavailableReason?: string;
+  keyProvider?: KeyProvider;
+  keyHint?: string;
+  /** CLI가 실제 비용을 보고하는지. false면 예산 상한을 걸 수 없다 (codex는 토큰만 보고) */
+  costTracked: boolean;
+  budgetUsd?: number;
+  /** 이번 달(서버 로컬 시간 기준) 누적 비용. api 모드만 */
+  spentUsd?: number;
+}
 
 export interface SessionMeta {
   id: string;
@@ -30,14 +49,20 @@ export type HistoryEntry = (
 
 export type ClientMessage = { reqId?: string } & (
   | { type: "session.list" }
-  | { type: "session.create"; title?: string; cwd: string; permission: PermissionLevel }
+  | { type: "session.create"; title?: string; cwd: string; permission: PermissionLevel; profileId: string }
   | { type: "session.open"; sessionId: string }
   | { type: "session.close"; sessionId: string }
   | { type: "run.send"; sessionId: string; text: string }
   | { type: "run.cancel"; sessionId: string }
+  | { type: "profile.list" }
+  | { type: "settings.setKey"; provider: KeyProvider; key: string }
+  | { type: "settings.deleteKey"; provider: KeyProvider }
+  | { type: "settings.setBudget"; profileId: string; budgetUsd: number | null }
 );
 
 export type ServerMessage =
+  | { type: "ack"; reqId?: string }
+  | { type: "profile.list"; profiles: ProfileInfo[] }
   | { type: "session.list"; sessions: SessionSummary[] }
   | { type: "session.created"; reqId?: string; session: SessionSummary }
   | { type: "session.updated"; session: SessionSummary }

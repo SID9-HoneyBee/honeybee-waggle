@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@honeybee-waggle/schema": "workspace:*",
+    "@napi-rs/keyring": "^2.1.2",
     "ws": "^8"
   },
   "devDependencies": {

@@ -9,6 +9,7 @@ import type {
   SessionMeta,
   SessionSummary,
 } from "@honeybee-waggle/schema";
+import type { ProfileService } from "../profiles/ProfileService";
 import type { FileSessionStore } from "../store/FileSessionStore";
 
 interface ManagerEvents {
@@ -32,7 +33,9 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
 
   constructor(
     private readonly store: FileSessionStore,
-    private readonly adapter: EngineAdapter,
+    /** profileId → 어댑터. 프로필마다 env(키, CODEX_HOME)가 달라서 어댑터도 프로필별로 하나씩 둔다 */
+    private readonly adapters: ReadonlyMap<string, EngineAdapter>,
+    private readonly profiles: ProfileService,
   ) {
     super();
   }
@@ -54,7 +57,14 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     return [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt).map((m) => this.summary(m));
   }
 
-  async create(input: { title?: string; cwd: string; permission: PermissionLevel }): Promise<SessionSummary> {
+  async create(input: {
+    title?: string;
+    cwd: string;
+    permission: PermissionLevel;
+    profileId: string;
+  }): Promise<SessionSummary> {
+    this.profiles.assertCanRun(input.profileId);
+    if (!this.adapters.has(input.profileId)) throw new Error(`아직 지원하지 않는 실행 방식: ${input.profileId}`);
     const cwd = input.cwd.trim();
     // 잘못된 cwd는 spawn 시점에야 ENOENT로 터지는데, 그때는 원인이 잘 안 보인다. 만들 때 미리 막는다.
     const stat = await fs.stat(cwd).catch(() => undefined);
@@ -64,7 +74,7 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     const meta: SessionMeta = {
       id: randomUUID(),
       title: input.title?.trim() ?? "",
-      profileId: this.adapter.profile.id,
+      profileId: input.profileId,
       cwd,
       permission: input.permission,
       createdAt: now,
@@ -87,6 +97,8 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     const meta = this.require(sessionId);
     if (!text.trim()) throw new Error("빈 메시지는 보낼 수 없음");
     if (this.running.has(sessionId)) throw new Error("이 세션은 아직 실행 중. 끝나거나 중단한 뒤에 보내줘.");
+    // 세션을 만든 뒤 키가 삭제됐거나 이번 달 예산을 넘겼을 수 있어서 보낼 때마다 다시 검사한다.
+    this.profiles.assertCanRun(meta.profileId);
 
     const runId = randomUUID();
     const ac = new AbortController();
@@ -111,8 +123,11 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
   private async execute(meta: SessionMeta, runId: string, text: string, ac: AbortController): Promise<void> {
     this.record(meta.id, { kind: "user", runId, text, ts: Date.now() });
     let completed = false;
+    let failure: string | undefined;
     try {
-      const events = this.adapter.run(
+      const adapter = this.adapters.get(meta.profileId);
+      if (!adapter) throw new Error(`실행 방식 ${meta.profileId}의 어댑터가 없음`);
+      const events = adapter.run(
         {
           runId,
           sessionId: meta.id,
@@ -129,16 +144,20 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
           meta.nativeSessionId = ev.nativeSessionId;
         }
         if (ev.type === "run.completed") completed = true;
+        if (ev.type === "usage" && ev.costUsd) {
+          this.profiles.addCost(meta.profileId, ev.costUsd).catch((err) => console.error("[session] 비용 기록 실패:", err));
+        }
         this.record(meta.id, { kind: "event", event: ev });
       }
     } catch (err) {
       // 어댑터 내부 예외도 화면에서는 "run이 실패로 끝남"으로 보여야 입력창이 다시 풀린다.
       console.error(`[session ${meta.id}] run ${runId} 예외:`, err);
+      failure = err instanceof Error ? err.message : String(err);
     } finally {
       if (!completed) {
         this.record(meta.id, {
           kind: "event",
-          event: { type: "run.completed", runId, ts: Date.now(), status: "error", error: "어댑터가 완료 이벤트 없이 종료됨" },
+          event: { type: "run.completed", runId, ts: Date.now(), status: "error", error: failure ?? "어댑터가 완료 이벤트 없이 종료됨" },
         });
       }
       this.running.delete(meta.id);

@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import type { ClientMessage, ServerMessage } from "@honeybee-waggle/schema";
+import type { ProfileService } from "../profiles/ProfileService";
 import type { SessionManager } from "../session/SessionManager";
 
 interface WsServerOptions {
@@ -13,7 +14,11 @@ interface WsServerOptions {
  * 대화 항목(session.entry)은 그 세션을 열어둔(session.open) 연결에만 보낸다.
  * 한 브라우저 탭이 세션 하나만 보더라도, 여러 탭이 서로 다른 세션을 볼 수 있게 연결별로 구독을 관리한다.
  */
-export function startWsServer(manager: SessionManager, opts: WsServerOptions): WebSocketServer {
+export function startWsServer(
+  manager: SessionManager,
+  profiles: ProfileService,
+  opts: WsServerOptions,
+): WebSocketServer {
   const wss = new WebSocketServer({
     host: opts.host,
     port: opts.port,
@@ -23,6 +28,11 @@ export function startWsServer(manager: SessionManager, opts: WsServerOptions): W
 
   manager.on("updated", (session) => {
     for (const ws of subscriptions.keys()) send(ws, { type: "session.updated", session });
+  });
+  // 키 등록·예산 변경·비용 누적은 열려 있는 모든 화면(설정, 새 세션 폼)에 바로 반영돼야 한다.
+  profiles.on("changed", () => {
+    const list = profiles.list();
+    for (const ws of subscriptions.keys()) send(ws, { type: "profile.list", profiles: list });
   });
   manager.on("entry", (sessionId, entry) => {
     for (const [ws, subs] of subscriptions) {
@@ -68,6 +78,21 @@ export function startWsServer(manager: SessionManager, opts: WsServerOptions): W
         return;
       case "run.cancel":
         manager.cancel(msg.sessionId);
+        return;
+      case "profile.list":
+        send(ws, { type: "profile.list", profiles: profiles.list() });
+        return;
+      case "settings.setKey":
+        await profiles.setKey(msg.provider, msg.key);
+        send(ws, { type: "ack", reqId: msg.reqId });
+        return;
+      case "settings.deleteKey":
+        await profiles.deleteKey(msg.provider);
+        send(ws, { type: "ack", reqId: msg.reqId });
+        return;
+      case "settings.setBudget":
+        await profiles.setBudget(msg.profileId, msg.budgetUsd);
+        send(ws, { type: "ack", reqId: msg.reqId });
         return;
       default:
         throw new Error(`알 수 없는 메시지 타입: ${(msg as { type?: string }).type}`);
