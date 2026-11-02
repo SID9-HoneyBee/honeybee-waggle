@@ -9,3 +9,6 @@ dist/
 
 .env*
 .claude/settings.local.json
+
+# Next가 자동 생성
+next-env.d.ts
