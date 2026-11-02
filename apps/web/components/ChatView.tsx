@@ -27,6 +27,7 @@ type Item =
   | { type: "end"; key: string; status: string; error?: string };
 
 const PERMISSION_LABEL = { "read-only": "읽기 전용", "workspace-write": "파일 수정 허용", full: "전체 허용" } as const;
+const CLI_NAME = { claude: "Claude Code", codex: "Codex" } as const;
 const CHANGE_LABEL = { add: "추가", modify: "수정", delete: "삭제" } as const;
 const END_LABEL: Record<string, string> = { error: "오류로 종료", cancelled: "중단됨", timeout: "시간 초과" };
 
@@ -37,6 +38,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const client = useWaggleClient();
   const view = useSessionView(sessionId);
   const session = useWaggle((s) => s.sessions.find((x) => x.id === sessionId));
+  const profile = useWaggle((s) => s.profiles.find((p) => p.id === session?.profileId));
   const connected = useWaggle((s) => s.conn === "open");
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -81,7 +83,8 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         <div className="mx-auto max-w-3xl space-y-3 px-5 py-6">
           {!view.loaded && <p className="text-sm text-neutral-500">기록 불러오는 중…</p>}
           {view.loaded && items.length === 0 && (
-            <p className="text-sm text-neutral-500">첫 메시지를 보내면 이 폴더에서 claude가 실행돼.</p>
+            <p className="text-sm text-neutral-500">첫 메시지를 보내면 이 폴더에서 {profile ? `${CLI_NAME[profile.engine]}(${profile.label})` : "에이전트"}가
+              실행돼.</p>
           )}
           {items.map((item) => (
             <ItemView key={item.key} item={item} />
