@@ -7,6 +7,7 @@ import type {
   HistoryEntry,
   RunRequest,
 } from "@honeybee-waggle/schema";
+import { composePrompt } from "../../session/transcript";
 import { anthropicCost } from "./modelCatalog";
 
 interface AnthropicChatAdapterOptions {
@@ -129,7 +130,8 @@ function buildMessages(history: HistoryEntry[], currentRunId: string, prompt: st
   for (const e of history) {
     if (e.kind === "user") {
       // 이번 run의 user 항목은 이미 기록에 들어가 있다. 아래에서 prompt로 한 번만 넣는다.
-      if (e.runId !== currentRunId) messages.push({ role: "user", content: e.text });
+      // 다른 세션 첨부가 있던 턴은 당시 모델이 본 그대로(첨부 + 문장) 다시 보낸다.
+      if (e.runId !== currentRunId) messages.push({ role: "user", content: composePrompt(e.context, e.text) });
     } else if (e.event.type === "raw") {
       const p = e.event.payload as { kind?: string; content?: Anthropic.Beta.BetaContentBlockParam[] } | null;
       if (p?.kind === ASSISTANT_RECORD && p.content) messages.push({ role: "assistant", content: p.content });

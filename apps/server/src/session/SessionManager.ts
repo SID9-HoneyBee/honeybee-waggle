@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
 import type {
   AgentEvent,
+  AttachedRef,
+  SessionRef,
   EngineAdapter,
   HistoryEntry,
   PermissionLevel,
@@ -11,6 +13,10 @@ import type {
 } from "@honeybee-waggle/schema";
 import type { ProfileService } from "../profiles/ProfileService";
 import type { FileSessionStore } from "../store/FileSessionStore";
+import { buildTranscript, composePrompt } from "./transcript";
+
+// 한 메시지에 너무 많은 세션을 붙이면 컨텍스트가 순식간에 차서 막아둔다.
+const MAX_REFS = 5;
 
 interface ManagerEvents {
   updated: [SessionSummary];
@@ -101,9 +107,21 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     return this.store.readHistory(sessionId);
   }
 
-  send(sessionId: string, text: string): string {
+  /** 다른 세션 첨부 미리보기. 실제 전송 때와 같은 함수로 만들어서 보이는 것과 보내는 것이 같다 */
+  async transcript(sessionId: string, includeTools: boolean): Promise<{ text: string; chars: number }> {
+    const meta = this.require(sessionId);
+    const text = buildTranscript(meta, this.profiles.label(meta.profileId), await this.store.readHistory(sessionId), includeTools);
+    return { text, chars: text.length };
+  }
+
+  send(sessionId: string, text: string, refs: SessionRef[] = []): string {
     const meta = this.require(sessionId);
     if (!text.trim()) throw new Error("빈 메시지는 보낼 수 없음");
+    if (refs.length > MAX_REFS) throw new Error(`다른 세션은 한 번에 ${MAX_REFS}개까지 첨부할 수 있음`);
+    for (const ref of refs) {
+      if (ref.sessionId === sessionId) throw new Error("현재 세션은 자기 자신을 참조할 수 없음");
+      this.require(ref.sessionId);
+    }
     if (this.deleting.has(sessionId)) throw new Error("삭제 중인 세션");
     if (this.running.has(sessionId)) throw new Error("이 세션은 아직 실행 중. 끝나거나 중단한 뒤에 보내줘.");
     // 세션을 만든 뒤 키가 삭제됐거나 이번 달 예산을 넘겼을 수 있어서 보낼 때마다 다시 검사한다.
@@ -116,7 +134,7 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     this.touch(meta);
 
     // run은 길게 돌 수 있어서 기다리지 않는다. 결과는 entry 이벤트로 흘려보낸다.
-    const execution = this.execute(meta, runId, text, ac);
+    const execution = this.execute(meta, runId, text, refs, ac);
     this.executions.set(sessionId, execution);
     void execution.finally(() => {
       if (this.executions.get(sessionId) === execution) this.executions.delete(sessionId);
@@ -154,8 +172,15 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     for (const ac of this.running.values()) ac.abort();
   }
 
-  private async execute(meta: SessionMeta, runId: string, text: string, ac: AbortController): Promise<void> {
-    this.record(meta.id, { kind: "user", runId, text, ts: Date.now() });
+  private async execute(
+    meta: SessionMeta,
+    runId: string,
+    text: string,
+    refs: SessionRef[],
+    ac: AbortController,
+  ): Promise<void> {
+    const { attached, context } = await this.buildRefs(refs);
+    this.record(meta.id, { kind: "user", runId, text, ts: Date.now(), refs: attached, context });
     let completed = false;
     let failure: string | undefined;
     try {
@@ -166,7 +191,7 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
           runId,
           sessionId: meta.id,
           profileId: meta.profileId,
-          prompt: text,
+          prompt: composePrompt(context, text),
           cwd: meta.cwd,
           permission: meta.permission,
           resumeNativeId: meta.nativeSessionId,
@@ -197,6 +222,29 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
       this.running.delete(meta.id);
       this.touch(meta);
     }
+  }
+
+  /**
+   * 첨부 시점의 정리본을 만들어 user 항목에 그대로 저장한다. 원본 세션이 나중에 이어지거나 삭제돼도
+   * 이 대화에서 모델이 봤던 내용은 바뀌지 않아야 기록을 다시 보낼 때(Claude API) 앞뒤가 맞는다.
+   * 전송 검증 뒤에 원본이 삭제됐으면 그 첨부만 빼고 진행한다.
+   */
+  private async buildRefs(refs: SessionRef[]): Promise<{ attached?: AttachedRef[]; context?: string }> {
+    if (refs.length === 0) return {};
+    const attached: AttachedRef[] = [];
+    const parts: string[] = [];
+    for (const ref of refs) {
+      const source = this.sessions.get(ref.sessionId);
+      if (!source) continue;
+      try {
+        const { text, chars } = await this.transcript(ref.sessionId, ref.includeTools);
+        parts.push(text);
+        attached.push({ ...ref, title: source.title, profileId: source.profileId, chars });
+      } catch (err) {
+        console.error(`[session] 참조 세션 ${ref.sessionId} 읽기 실패, 첨부에서 제외:`, err);
+      }
+    }
+    return parts.length ? { attached, context: parts.join("\n\n") } : {};
   }
 
   /**

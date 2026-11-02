@@ -42,13 +42,35 @@ export interface SessionSummary extends SessionMeta {
   running: boolean;
 }
 
+/** 메시지에 첨부할 다른 세션. includeTools면 정리본에 도구 호출 과정도 넣는다 */
+export interface SessionRef {
+  sessionId: string;
+  includeTools: boolean;
+}
+
+/** 첨부된 참조의 표시용 정보. 원본 세션이 나중에 삭제·변경돼도 당시 모습으로 보이게 함께 저장한다 */
+export interface AttachedRef extends SessionRef {
+  title: string;
+  profileId: string;
+  chars: number;
+}
+
 /**
  * seq는 디스크에 저장된 항목에만 붙는다.
  * 세션을 열 때 "구독 → 기록 전송" 사이에 끼어든 실시간 항목이 기록과 중복될 수 있어서,
  * 클라이언트가 seq로 중복을 걸러낸다. message.delta처럼 저장하지 않는 항목은 seq가 없다.
  */
 export type HistoryEntry = (
-  | { kind: "user"; runId: string; text: string; ts: number }
+  | {
+      kind: "user";
+      runId: string;
+      /** 사용자가 입력한 문장 그대로 (화면 표시·제목용) */
+      text: string;
+      ts: number;
+      refs?: AttachedRef[];
+      /** 첨부 정리본을 합친 텍스트. 모델에는 context + text가 간다. 대화 재구성(Claude API)도 이 값을 쓴다 */
+      context?: string;
+    }
   | { kind: "event"; event: AgentEvent }
 ) & { seq?: number };
 
@@ -58,7 +80,8 @@ export type ClientMessage = { reqId?: string } & (
   | { type: "session.open"; sessionId: string }
   | { type: "session.close"; sessionId: string }
   | { type: "session.delete"; sessionId: string }
-  | { type: "run.send"; sessionId: string; text: string }
+  | { type: "run.send"; sessionId: string; text: string; refs?: SessionRef[] }
+  | { type: "session.transcript"; sessionId: string; includeTools: boolean }
   | { type: "run.cancel"; sessionId: string }
   | { type: "profile.list" }
   | { type: "settings.setKey"; provider: KeyProvider; key: string }
@@ -75,5 +98,6 @@ export type ServerMessage =
   | { type: "session.updated"; session: SessionSummary }
   | { type: "session.removed"; sessionId: string }
   | { type: "session.history"; sessionId: string; entries: HistoryEntry[] }
+  | { type: "session.transcript"; reqId?: string; sessionId: string; text: string; chars: number }
   | { type: "session.entry"; sessionId: string; entry: HistoryEntry }
   | { type: "error"; reqId?: string; message: string };

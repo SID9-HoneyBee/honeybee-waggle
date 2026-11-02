@@ -105,8 +105,13 @@ export function startWsServer(
         send(ws, { type: "ack", reqId: msg.reqId });
         return;
       case "run.send":
-        manager.send(msg.sessionId, msg.text);
+        manager.send(msg.sessionId, msg.text, msg.refs);
         return;
+      case "session.transcript": {
+        const { text, chars } = await manager.transcript(msg.sessionId, msg.includeTools);
+        send(ws, { type: "session.transcript", reqId: msg.reqId, sessionId: msg.sessionId, text, chars });
+        return;
+      }
       case "run.cancel":
         manager.cancel(msg.sessionId);
         return;

@@ -4,6 +4,7 @@ import type {
   KeyProvider,
   PermissionLevel,
   ProfileInfo,
+  SessionRef,
   ServerMessage,
   SessionSummary,
 } from "@honeybee-waggle/schema";
@@ -122,6 +123,10 @@ export class WaggleClient {
     return this.request({ type: "session.create", ...input }) as Promise<SessionSummary>;
   }
 
+  transcript(sessionId: string, includeTools: boolean): Promise<{ text: string; chars: number }> {
+    return this.request({ type: "session.transcript", sessionId, includeTools }) as Promise<{ text: string; chars: number }>;
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     await this.request({ type: "session.delete", sessionId });
   }
@@ -142,8 +147,8 @@ export class WaggleClient {
     await this.request({ type: "settings.setBudget", profileId, budgetUsd });
   }
 
-  sendMessage(sessionId: string, text: string): void {
-    if (!this.rawSend({ type: "run.send", reqId: this.nextReqId(), sessionId, text })) {
+  sendMessage(sessionId: string, text: string, refs?: SessionRef[]): void {
+    if (!this.rawSend({ type: "run.send", reqId: this.nextReqId(), sessionId, text, refs })) {
       this.notify("서버에 연결되어 있지 않아 보내지 못했어.");
     }
   }
@@ -163,6 +168,9 @@ export class WaggleClient {
         return;
       case "profile.list":
         this.set({ profiles: msg.profiles });
+        return;
+      case "session.transcript":
+        if (msg.reqId) this.settle(msg.reqId, (p) => p.resolve({ text: msg.text, chars: msg.chars }));
         return;
       case "ack":
         if (msg.reqId) this.settle(msg.reqId, (p) => p.resolve(undefined));

@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { HistoryEntry, ToolKind } from "@honeybee-waggle/schema";
+import type { AttachedRef, Engine, HistoryEntry, ToolKind } from "@honeybee-waggle/schema";
 import { FILES_BASE, useSessionView, useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
-import { formatTokens } from "@/lib/format";
+import { approxTokens, formatTokens } from "@/lib/format";
 import { ModeBadge } from "./ModeBadge";
+import { RefPicker } from "./RefPicker";
 import { ToolCard } from "./ToolCard";
 
 type Item =
-  | { type: "user"; key: string; text: string }
+  | { type: "user"; key: string; text: string; refs?: AttachedRef[]; context?: string }
   | { type: "assistant"; key: string; text: string }
   | { type: "reasoning"; key: string; text: string }
   | {
@@ -27,6 +28,7 @@ type Item =
   | { type: "end"; key: string; status: string; error?: string };
 
 const PERMISSION_LABEL = { "read-only": "읽기 전용", "workspace-write": "파일 수정 허용", full: "전체 허용" } as const;
+const VENDOR = { claude: "Anthropic", codex: "OpenAI" } as const;
 const CLI_NAME = { claude: "Claude Code", codex: "Codex" } as const;
 const CHANGE_LABEL = { add: "추가", modify: "수정", delete: "삭제" } as const;
 const END_LABEL: Record<string, string> = { error: "오류로 종료", cancelled: "중단됨", timeout: "시간 초과" };
@@ -105,11 +107,17 @@ export function ChatView({ sessionId }: { sessionId: string }) {
       </div>
 
       <Composer
+        sessionId={sessionId}
+        targetEngine={profile?.engine}
         disabled={!connected}
         running={session.running}
-        onSend={(text) => {
+        onSend={(text, refs) => {
           stickRef.current = true;
-          client.sendMessage(sessionId, text);
+          client.sendMessage(
+            sessionId,
+            text,
+            refs.map((r) => ({ sessionId: r.sessionId, includeTools: r.includeTools })),
+          );
         }}
         onCancel={() => client.cancelRun(sessionId)}
       />
@@ -121,7 +129,20 @@ function ItemView({ item, sessionId }: { item: Item; sessionId: string }) {
   switch (item.type) {
     case "user":
       return (
-        <div className="flex justify-end">
+        <div className="flex flex-col items-end gap-1.5">
+          {item.refs && item.refs.length > 0 && (
+            <details className="max-w-[85%] text-xs">
+              <summary className="flex cursor-pointer list-none flex-wrap justify-end gap-1.5">
+                {item.refs.map((r) => (
+                  <RefChip key={r.sessionId} refInfo={r} />
+                ))}
+              </summary>
+              {/* 원본 세션이 바뀌거나 지워져도 이 메시지와 함께 보냈던 그대로를 보여준다 */}
+              <pre className="mt-1.5 max-h-60 overflow-auto whitespace-pre-wrap rounded bg-neutral-50 p-2 dark:bg-neutral-900">
+                {item.context}
+              </pre>
+            </details>
+          )}
           <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-neutral-900 px-4 py-2 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900">
             {item.text}
           </div>
@@ -177,25 +198,72 @@ function Markdown({ text }: { text: string }) {
 }
 
 function Composer(props: {
+  sessionId: string;
+  /** 첨부 내용이 다른 회사 API로 넘어가는지 판단하는 기준 */
+  targetEngine?: Engine;
   disabled: boolean;
   running: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, refs: AttachedRef[]) => void;
   onCancel: () => void;
 }) {
   const [text, setText] = useState("");
+  const [refs, setRefs] = useState<AttachedRef[]>([]);
+  const [picking, setPicking] = useState(false);
+  const profiles = useWaggle((s) => s.profiles);
   // 입력 잠금 기준은 run.completed가 아니라 session.running이다. 완료 이벤트 직후에도 서버는
   // 프로세스 종료를 기다리는 중이라, 그 틈에 보내면 "아직 실행 중"으로 거절된다.
   const canSend = !props.disabled && !props.running && text.trim().length > 0;
 
   function send() {
     if (!canSend) return;
-    props.onSend(text);
+    // 같은 회사 안(구독↔API)은 이미 그 회사가 본 내용이다. 회사가 바뀔 때만 외부 전송을 확인한다.
+    const crossing = refs.filter((r) => {
+      const engine = profiles.find((p) => p.id === r.profileId)?.engine;
+      return engine && props.targetEngine && engine !== props.targetEngine;
+    });
+    if (crossing.length > 0 && props.targetEngine) {
+      const vendor = VENDOR[props.targetEngine];
+      const titles = crossing.map((r) => `"${r.title || "(제목 없음)"}"`).join(", ");
+      if (!confirm(`${titles} 세션의 대화 내용이 ${vendor}로 전송돼. 코드나 경로가 들어 있을 수 있어. 계속할까?`)) return;
+    }
+    props.onSend(text, refs);
     setText("");
+    setRefs([]);
+    setPicking(false);
   }
 
   return (
     <div className="border-t border-neutral-200 p-4 dark:border-neutral-800">
+      {picking && (
+        <RefPicker
+          currentSessionId={props.sessionId}
+          attachedIds={refs.map((r) => r.sessionId)}
+          onAttach={(ref) => {
+            setRefs((prev) => [...prev, ref]);
+            setPicking(false);
+          }}
+          onClose={() => setPicking(false)}
+        />
+      )}
+      {refs.length > 0 && (
+        <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-1.5">
+          {refs.map((r) => (
+            <RefChip key={r.sessionId} refInfo={r} onRemove={() => setRefs((prev) => prev.filter((x) => x !== r))} />
+          ))}
+        </div>
+      )}
       <div className="mx-auto flex max-w-3xl items-end gap-2">
+        <button
+          type="button"
+          title="다른 세션 참조"
+          onClick={() => setPicking((v) => !v)}
+          disabled={props.disabled}
+          className={`rounded-md border px-2.5 py-2 text-sm disabled:opacity-40 ${
+            picking ? "border-neutral-900 dark:border-neutral-100" : "border-neutral-300 dark:border-neutral-700"
+          }`}
+        >
+          📎
+        </button>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -248,7 +316,7 @@ function toItems(entries: HistoryEntry[]): Item[] {
   entries.forEach((e, i) => {
     const key = String(e.seq ?? `i${i}`);
     if (e.kind === "user") {
-      items.push({ type: "user", key, text: e.text });
+      items.push({ type: "user", key, text: e.text, refs: e.refs, context: e.context });
       return;
     }
     const ev = e.event;
@@ -283,4 +351,21 @@ function toItems(entries: HistoryEntry[]): Item[] {
     }
   });
   return items;
+}
+
+function RefChip({ refInfo, onRemove }: { refInfo: AttachedRef; onRemove?: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-900">
+      📎 <span className="max-w-48 truncate">{refInfo.title || "(제목 없음)"}</span>
+      <ModeBadge profileId={refInfo.profileId} />
+      <span className="text-neutral-500">
+        {refInfo.includeTools ? "도구 포함" : "정리본"} · 약 {approxTokens(refInfo.chars).toLocaleString()}토큰
+      </span>
+      {onRemove && (
+        <button type="button" onClick={onRemove} className="text-neutral-400 hover:text-red-600" aria-label="첨부 제거">
+          ✕
+        </button>
+      )}
+    </span>
+  );
 }

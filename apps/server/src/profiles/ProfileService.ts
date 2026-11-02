@@ -68,6 +68,10 @@ export class ProfileService extends EventEmitter<{ changed: [] }> {
     return { ...def.profile, budgetUsd: this.settings.budgets[profileId], model: this.modelFor(def) };
   }
 
+  label(profileId: string): string {
+    return this.defs.find((d) => d.profile.id === profileId)?.label ?? profileId;
+  }
+
   list(): ProfileInfo[] {
     return this.defs.map((def) => {
       const { profile } = def;

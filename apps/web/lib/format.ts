@@ -12,3 +12,8 @@ export function formatTokens(n: number | undefined): string {
   if (n === undefined) return "-";
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
+
+// 토큰 수는 모델·언어마다 달라서 정확히 알 수 없다. 한글이 섞인 텍스트 기준 대략치로, 크기 감만 주는 용도.
+export function approxTokens(chars: number): number {
+  return Math.ceil(chars / 2.5);
+}
