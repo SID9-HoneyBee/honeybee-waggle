@@ -100,6 +100,10 @@ export function startWsServer(
       case "session.close":
         subscriptions.get(ws)?.delete(msg.sessionId);
         return;
+      case "session.rename":
+        manager.rename(msg.sessionId, msg.title);
+        send(ws, { type: "ack", reqId: msg.reqId });
+        return;
       case "session.delete":
         await manager.delete(msg.sessionId);
         send(ws, { type: "ack", reqId: msg.reqId });

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import type { SessionSummary } from "@honeybee-waggle/schema";
+import { useDialog } from "@/lib/dialog";
 import { useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { formatRelative } from "@/lib/format";
 import { ModeBadge } from "./ModeBadge";
@@ -13,20 +15,36 @@ export function SessionSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const client = useWaggleClient();
-
-  async function remove(id: string, title: string, running: boolean) {
-    const warn = running ? "\n실행 중인 작업은 중단돼." : "";
-    if (!confirm(`"${title || "(제목 없음)"}" 세션과 대화 기록을 삭제할까?${warn}`)) return;
-    try {
-      await client.deleteSession(id);
-      // 지금 보고 있던 세션이면 빈 화면("세션을 찾을 수 없어")에 남지 않게 새 세션 화면으로 보낸다.
-      if (pathname === `/sessions/${id}`) router.push("/");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
-    }
-  }
+  const dialog = useDialog();
   const sessions = useWaggle((s) => s.sessions);
   const conn = useWaggle((s) => s.conn);
+
+  async function remove(s: SessionSummary) {
+    const ok = await dialog.confirm({
+      title: "세션을 삭제할까?",
+      message: `"${s.title || "(제목 없음)"}" 세션과 대화 기록이 지워져.${s.running ? "\n실행 중인 작업은 중단돼." : ""}`,
+      tone: "danger",
+      confirmLabel: "삭제",
+    });
+    if (!ok) return;
+    try {
+      await client.deleteSession(s.id);
+      // 지금 보고 있던 세션이면 빈 화면("세션을 찾을 수 없어")에 남지 않게 새 세션 화면으로 보낸다.
+      if (pathname === `/sessions/${s.id}`) router.push("/");
+    } catch (err) {
+      await dialog.alert({ title: "삭제하지 못했어", message: errorText(err), tone: "danger" });
+    }
+  }
+
+  async function rename(s: SessionSummary) {
+    const title = await dialog.prompt({ title: "세션 제목 변경", defaultValue: s.title, confirmLabel: "변경" });
+    if (title === null || title.trim() === s.title) return;
+    try {
+      await client.renameSession(s.id, title);
+    } catch (err) {
+      await dialog.alert({ title: "제목을 바꾸지 못했어", message: errorText(err), tone: "danger" });
+    }
+  }
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900">
@@ -50,31 +68,27 @@ export function SessionSidebar() {
             <Link
               key={s.id}
               href={`/sessions/${s.id}`}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                void rename(s);
+              }}
               className={`group mb-0.5 block rounded-md px-2 py-2 text-sm ${
                 active ? "bg-neutral-200 dark:bg-neutral-800" : "hover:bg-neutral-100 dark:hover:bg-neutral-800/60"
               }`}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 {s.running && <span className="size-2 shrink-0 animate-pulse rounded-full bg-emerald-500" title="실행 중" />}
                 <span className="min-w-0 flex-1 truncate">{s.title || "(제목 없음)"}</span>
                 <ModeBadge profileId={s.profileId} />
-                <button
-                  type="button"
-                  title="세션 삭제"
-                  aria-label="세션 삭제"
-                  onClick={(e) => {
-                    // 버튼이 Link 안에 있어서 막지 않으면 삭제 확인창과 동시에 세션 화면으로 이동한다.
-                    e.preventDefault();
-                    e.stopPropagation();
-                    void remove(s.id, s.title, s.running);
-                  }}
-                  className="hidden shrink-0 rounded px-1 text-neutral-400 hover:bg-neutral-300 hover:text-red-600 group-hover:block dark:hover:bg-neutral-700"
-                >
+                <ItemButton label="제목 변경" onClick={() => void rename(s)}>
+                  ✎
+                </ItemButton>
+                <ItemButton label="세션 삭제" danger onClick={() => void remove(s)}>
                   ✕
-                </button>
+                </ItemButton>
               </div>
               <div className="mt-0.5 truncate text-xs text-neutral-500">
-                {formatRelative(s.updatedAt)} · {s.cwd}
+                {formatRelative(s.updatedAt)} · {s.cwd || "API 대화"}
               </div>
             </Link>
           );
@@ -95,4 +109,29 @@ export function SessionSidebar() {
       </div>
     </aside>
   );
+}
+
+function ItemButton(props: { label: string; danger?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={props.label}
+      aria-label={props.label}
+      onClick={(e) => {
+        // 버튼이 Link 안에 있어서 막지 않으면 버튼 동작과 동시에 세션 화면으로 이동한다.
+        e.preventDefault();
+        e.stopPropagation();
+        props.onClick();
+      }}
+      className={`hidden shrink-0 rounded px-1 text-neutral-400 hover:bg-neutral-300 group-hover:block dark:hover:bg-neutral-700 ${
+        props.danger ? "hover:text-red-600" : "hover:text-neutral-800 dark:hover:text-neutral-100"
+      }`}
+    >
+      {props.children}
+    </button>
+  );
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { KeyProvider, ProfileInfo } from "@honeybee-waggle/schema";
+import { useDialog } from "@/lib/dialog";
 import { useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { ModeBadge } from "./ModeBadge";
 
@@ -86,6 +87,7 @@ function KeyRow(props: {
   disabled: boolean;
 }) {
   const client = useWaggleClient();
+  const dialog = useDialog();
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string }>();
@@ -138,10 +140,14 @@ function KeyRow(props: {
           <button
             type="button"
             disabled={props.disabled || busy}
-            onClick={() => {
-              if (confirm("이 키를 삭제할까? 이 방식으로 만든 세션은 키를 다시 등록할 때까지 실행할 수 없어.")) {
-                void run(() => client.deleteKey(props.provider), "삭제했어.");
-              }
+            onClick={async () => {
+              const ok = await dialog.confirm({
+                title: "API 키를 삭제할까?",
+                message: "이 방식으로 만든 세션은 키를 다시 등록할 때까지 실행할 수 없어.",
+                tone: "danger",
+                confirmLabel: "삭제",
+              });
+              if (ok) void run(() => client.deleteKey(props.provider), "삭제했어.");
             }}
             className="rounded-md border border-red-400 px-3 py-1.5 text-sm text-red-600 disabled:opacity-40"
           >

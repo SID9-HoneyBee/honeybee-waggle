@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { NoticeBanner } from "@/components/NoticeBanner";
+import { DialogProvider } from "@/lib/dialog";
 import { WaggleProvider } from "@/lib/WaggleProvider";
 import "./globals.css";
 
@@ -14,13 +15,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ko">
       <body className="h-dvh overflow-hidden">
         <WaggleProvider>
-          <div className="flex h-full">
-            <SessionSidebar />
-            <main className="relative flex min-w-0 flex-1 flex-col">
-              <NoticeBanner />
-              {children}
-            </main>
-          </div>
+          <DialogProvider>
+            <div className="flex h-full">
+              <SessionSidebar />
+              <main className="relative flex min-w-0 flex-1 flex-col">
+                <NoticeBanner />
+                {children}
+              </main>
+            </div>
+          </DialogProvider>
         </WaggleProvider>
       </body>
     </html>

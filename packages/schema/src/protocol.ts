@@ -80,6 +80,7 @@ export type ClientMessage = { reqId?: string } & (
   | { type: "session.open"; sessionId: string }
   | { type: "session.close"; sessionId: string }
   | { type: "session.delete"; sessionId: string }
+  | { type: "session.rename"; sessionId: string; title: string }
   | { type: "run.send"; sessionId: string; text: string; refs?: SessionRef[] }
   | { type: "session.transcript"; sessionId: string; includeTools: boolean }
   | { type: "run.cancel"; sessionId: string }

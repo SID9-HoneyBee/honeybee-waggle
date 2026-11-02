@@ -127,6 +127,10 @@ export class WaggleClient {
     return this.request({ type: "session.transcript", sessionId, includeTools }) as Promise<{ text: string; chars: number }>;
   }
 
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    await this.request({ type: "session.rename", sessionId, title });
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     await this.request({ type: "session.delete", sessionId });
   }

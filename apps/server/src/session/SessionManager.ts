@@ -107,6 +107,14 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     return this.store.readHistory(sessionId);
   }
 
+  rename(sessionId: string, title: string): void {
+    const meta = this.require(sessionId);
+    const next = title.trim();
+    if (!next) throw new Error("빈 제목으로는 바꿀 수 없음");
+    meta.title = next.slice(0, 100);
+    this.touch(meta);
+  }
+
   /** 다른 세션 첨부 미리보기. 실제 전송 때와 같은 함수로 만들어서 보이는 것과 보내는 것이 같다 */
   async transcript(sessionId: string, includeTools: boolean): Promise<{ text: string; chars: number }> {
     const meta = this.require(sessionId);

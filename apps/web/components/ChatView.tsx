@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AttachedRef, Engine, HistoryEntry, ToolKind } from "@honeybee-waggle/schema";
+import { useDialog } from "@/lib/dialog";
 import { FILES_BASE, useSessionView, useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { approxTokens, formatTokens } from "@/lib/format";
 import { ModeBadge } from "./ModeBadge";
@@ -210,11 +211,12 @@ function Composer(props: {
   const [refs, setRefs] = useState<AttachedRef[]>([]);
   const [picking, setPicking] = useState(false);
   const profiles = useWaggle((s) => s.profiles);
+  const dialog = useDialog();
   // 입력 잠금 기준은 run.completed가 아니라 session.running이다. 완료 이벤트 직후에도 서버는
   // 프로세스 종료를 기다리는 중이라, 그 틈에 보내면 "아직 실행 중"으로 거절된다.
   const canSend = !props.disabled && !props.running && text.trim().length > 0;
 
-  function send() {
+  async function send() {
     if (!canSend) return;
     // 같은 회사 안(구독↔API)은 이미 그 회사가 본 내용이다. 회사가 바뀔 때만 외부 전송을 확인한다.
     const crossing = refs.filter((r) => {
@@ -224,7 +226,13 @@ function Composer(props: {
     if (crossing.length > 0 && props.targetEngine) {
       const vendor = VENDOR[props.targetEngine];
       const titles = crossing.map((r) => `"${r.title || "(제목 없음)"}"`).join(", ");
-      if (!confirm(`${titles} 세션의 대화 내용이 ${vendor}로 전송돼. 코드나 경로가 들어 있을 수 있어. 계속할까?`)) return;
+      const ok = await dialog.confirm({
+        title: `${vendor}로 전송할까?`,
+        message: `${titles} 세션의 대화 내용이 ${vendor}로 전송돼. 코드나 경로가 들어 있을 수 있어.`,
+        tone: "warning",
+        confirmLabel: "전송",
+      });
+      if (!ok) return;
     }
     props.onSend(text, refs);
     setText("");
@@ -271,7 +279,7 @@ function Composer(props: {
             // 한글 IME 조합 중 Enter는 글자 확정용이다. 여기서 보내면 마지막 글자가 잘리거나 두 번 전송된다.
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              send();
+              void send();
             }
           }}
           rows={Math.min(8, Math.max(2, text.split("\n").length))}
