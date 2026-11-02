@@ -43,6 +43,8 @@ export interface ApprovalRequest {
   path: string;
   /** 수정 요청일 때 변경 내용 (unified diff) */
   diff?: string;
+  /** .env·키 파일처럼 비밀이 있을 수 있는 파일. 승인 방식과 무관하게 묻고, 화면에 경고를 띄운다 */
+  sensitive?: boolean;
 }
 
 export interface SessionMeta {

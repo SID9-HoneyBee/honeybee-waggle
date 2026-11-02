@@ -42,6 +42,7 @@ The goal: keep the subscriptions and the credits both working.
   - Edits show a diff and wait for your approval.
   - Approval policy is per session: confirm edits only / confirm everything / fully automatic.
 - API mode never runs shell commands.
+- **Files that may hold secrets** — `.env`, keys and certificates, `appsettings*.json`, and similar — **always require approval regardless of the policy**, with a warning on the approval card. Their contents would be sent to the AI provider.
 
 ### Also
 - 📄 Attach text files

@@ -113,6 +113,7 @@ Open **http://127.0.0.1:3000**. When the bottom-left corner shows "Connected", y
 | `CLAUDE_BIN` | auto-detected | Path to the claude executable |
 | `CODEX_BIN` | auto-detected | Path to the codex executable |
 | `NEXT_PUBLIC_WAGGLE_WS` | `ws://127.0.0.1:4317` | Server address the web app connects to. **Fixed at build time**, so rebuild after changing it |
+| `WAGGLE_PASS_ENV` | none | Extra environment variable names to pass to the subscription CLIs (comma-separated, e.g. `GH_TOKEN`). By default only the variables needed to run are passed and everything else is blocked. The agent can read passed variables through the shell, so add only what you need |
 
 ## Troubleshooting
 

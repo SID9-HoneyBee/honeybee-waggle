@@ -26,6 +26,11 @@ export function ApprovalPanel({ sessionId }: { sessionId: string }) {
             <span className="font-medium">{t(ACTION_KEY[r.action])}</span>
             <span className="min-w-0 flex-1 truncate font-mono text-xs">{r.path}</span>
           </div>
+          {r.sensitive && (
+            <p className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-300">
+              ⚠️ {t("approval.sensitive")}
+            </p>
+          )}
           {r.diff && <DiffView diff={r.diff} />}
           <div className="mt-2 flex justify-end gap-2">
             <button

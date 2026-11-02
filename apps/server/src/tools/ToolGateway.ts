@@ -74,11 +74,22 @@ export class ToolGateway extends EventEmitter<{
       return { ok: false, output: errorText(err) };
     }
 
-    const needsApproval = config.approval === "all" || (config.approval === "writes" && call.action === "write");
+    // 민감한 파일(.env, 키 등)은 승인 방식이 "모두 자동"이어도 묻는다. 읽은 내용이 모델 API로 그대로 나가기 때문이다.
+    const needsApproval =
+      call.sensitive || config.approval === "all" || (config.approval === "writes" && call.action === "write");
     if (needsApproval) {
       const approved = await this.ask(
         sessionId,
-        { approvalId: randomUUID(), runId, toolCallId, tool: name, action: call.action, path: call.relPath, diff: call.diff },
+        {
+          approvalId: randomUUID(),
+          runId,
+          toolCallId,
+          tool: name,
+          action: call.action,
+          path: call.relPath,
+          diff: call.diff,
+          sensitive: call.sensitive || undefined,
+        },
         signal,
       );
       if (!approved) return { ok: false, output: "사용자가 이 작업을 거절함. 같은 작업을 다시 시도하지 말고, 필요하면 이유를 설명하거나 다른 방법을 물어봐." };

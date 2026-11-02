@@ -76,10 +76,36 @@ async function assertUnchanged(file: string, expected: string | null): Promise<v
   if (current !== expected) throw new Error("승인을 기다리는 동안 파일이 바뀌어서 쓰지 않음. 파일을 다시 읽고 수정해.");
 }
 
+/**
+ * 비밀이 들어 있을 가능성이 높은 파일. 읽은 내용은 모델 API로 전송되고 대화 기록에도 남으므로,
+ * 승인 방식이 "모두 자동"이어도 이 파일들은 항상 사용자에게 묻는다. .gitignore에 있다고 안전한 게 아니다.
+ * 예시·템플릿 파일(.env.example 등)은 보통 값이 비어 있어 제외한다.
+ */
+const SENSITIVE_NAMES: RegExp[] = [
+  /^\.env(?!\.(example|sample|template)$)(\..+)?$/i,
+  /\.(pem|key|p12|pfx|jks|keystore|kdbx|ppk|asc)$/i,
+  /^id_(rsa|dsa|ecdsa|ed25519)$/i,
+  /^\.(npmrc|pypirc|netrc|git-credentials|pgpass)$/i,
+  /^(credentials|secrets?)(\..+)?$/i,
+  // C#/.NET 프로젝트는 연결 문자열·키를 appsettings*.json, web.config, *.publishsettings에 두는 경우가 많다.
+  /^appsettings(\..+)?\.json$/i,
+  /^web\.config$/i,
+  /\.publishsettings$/i,
+];
+const SENSITIVE_DIRS = new Set([".ssh", ".aws", ".gnupg", ".azure", ".kube"]);
+
+export function isSensitivePath(relPath: string): boolean {
+  const parts = relPath.split("/");
+  const name = parts[parts.length - 1] ?? "";
+  return parts.some((p) => SENSITIVE_DIRS.has(p)) || SENSITIVE_NAMES.some((re) => re.test(name));
+}
+
 export interface PreparedCall {
   action: ToolSpec["action"];
   /** 연결 폴더 기준 상대 경로 (승인 화면 표시용) */
   relPath: string;
+  /** 민감한 파일이면 승인 방식과 무관하게 항상 묻는다 */
+  sensitive: boolean;
   diff?: string;
   /** 승인 후 실제 실행. 승인 전에 diff를 만들려고 읽은 내용을 재사용한다 */
   run: () => Promise<string>;
@@ -93,16 +119,45 @@ export async function prepareCall(root: string, name: string, input: Record<stri
   const spec = FOLDER_TOOLS.find((t) => t.name === name);
   if (!spec) throw new Error(`알 수 없는 도구: ${name}`);
   const rel = typeof input.path === "string" && input.path.trim() ? input.path.trim() : ".";
-  const abs = await resolveInside(root, rel, spec.action === "write");
+  const forWrite = spec.action === "write";
+  const abs = await resolveInside(root, rel, forWrite);
   const relPath = toSlash(path.relative(await fs.realpath(root), abs)) || ".";
+  const sensitive = spec.action !== "list" && isSensitivePath(relPath);
+
+  /**
+   * 검사(여기)와 실행(승인 뒤 run) 사이에는 시간이 있다. 그 사이 다른 프로세스가 하위 폴더를 외부를 가리키는
+   * 링크로 바꾸면, 처음에 검사한 경로로 그대로 쓰는 순간 연결 폴더 밖에 쓰게 된다. 실행 직전에 같은 검사를 다시 해서
+   * 실제 경로가 처음과 같은지 확인한다. 재검사와 쓰기 사이의 아주 짧은 틈은 남는다 (Windows에서 경로 구성요소마다
+   * 링크를 따라가지 않고 여는 방법이 없다). 로컬에 악성 프로세스가 있는 상황까지 완전히 막지는 못한다.
+   */
+  const reverify = async () => {
+    const again = await resolveInside(root, rel, forWrite);
+    if (again !== abs) throw new Error("검사 이후 경로가 바뀌어서 실행하지 않음 (링크 교체 등). 다시 시도해.");
+  };
 
   switch (name) {
     case "list_files":
-      return { action: "list", relPath, run: () => listFiles(abs) };
+      return {
+        action: "list",
+        relPath,
+        sensitive,
+        run: async () => {
+          await reverify();
+          return listFiles(abs);
+        },
+      };
     case "read_file": {
       const start = asInt(input.start_line);
       const end = asInt(input.end_line);
-      return { action: "read", relPath, run: () => readFile(abs, start, end) };
+      return {
+        action: "read",
+        relPath,
+        sensitive,
+        run: async () => {
+          await reverify();
+          return readFile(abs, start, end);
+        },
+      };
     }
     case "edit_file": {
       const oldStr = String(input.old_string ?? "");
@@ -114,8 +169,10 @@ export async function prepareCall(root: string, name: string, input: Record<stri
       return {
         action: "write",
         relPath,
+        sensitive,
         diff: createTwoFilesPatch(relPath, relPath, before, after),
         run: async () => {
+          await reverify();
           await assertUnchanged(abs, before);
           await fs.writeFile(abs, after, "utf8");
           return `수정함: ${relPath}`;
@@ -128,10 +185,14 @@ export async function prepareCall(root: string, name: string, input: Record<stri
       return {
         action: "write",
         relPath,
+        sensitive,
         diff: createTwoFilesPatch(relPath, relPath, before ?? "", content),
         run: async () => {
+          await reverify();
           await assertUnchanged(abs, before);
           await fs.mkdir(path.dirname(abs), { recursive: true });
+          // mkdir가 만든 중간 폴더 경로도 링크로 바뀔 수 있어서 쓰기 직전에 한 번 더 본다.
+          await reverify();
           await fs.writeFile(abs, content, "utf8");
           return `저장함: ${relPath}`;
         },

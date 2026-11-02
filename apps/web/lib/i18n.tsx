@@ -137,6 +137,7 @@ const ko = {
   "approval.action.list": "폴더 목록 보기",
   "approval.action.read": "파일 읽기",
   "approval.action.write": "파일 수정",
+  "approval.sensitive": "비밀 정보가 들어 있을 수 있는 파일이에요 (.env, 키, 설정 파일 등). 승인하면 내용이 AI 제공사로 전송돼요.",
   "approval.reject": "거절",
   "approval.approve": "승인",
 
@@ -307,6 +308,7 @@ const en: Record<MessageKey, string> = {
   "approval.action.list": "List folder",
   "approval.action.read": "Read file",
   "approval.action.write": "Edit file",
+  "approval.sensitive": "This file may contain secrets (.env, keys, config files, etc.). If you approve, its contents are sent to the AI provider.",
   "approval.reject": "Reject",
   "approval.approve": "Approve",
 

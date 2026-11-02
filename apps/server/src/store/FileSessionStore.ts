@@ -3,7 +3,7 @@ import path from "node:path";
 import type { HistoryEntry, SessionMeta } from "@honeybee-waggle/schema";
 
 // 세션 ID는 서버가 randomUUID로만 만든다. 그 외 형태가 들어오면 경로 조작 시도로 보고 막는다.
-const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * .data/sessions/<id>/meta.json   세션 정보 (통째로 덮어씀)

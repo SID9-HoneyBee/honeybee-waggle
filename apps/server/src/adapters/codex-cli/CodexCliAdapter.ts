@@ -7,7 +7,7 @@ import {
   type EngineAdapter,
   type RunRequest,
 } from "@honeybee-waggle/schema";
-import { stripParentSessionEnv } from "../../env/parentEnv";
+import { safeBaseEnv } from "../../env/baseEnv";
 import { runCliProcess } from "../cliProcess";
 import { CodexStreamMapper } from "./CodexStreamMapper";
 import type { CodexCommand } from "./resolveCodexBin";
@@ -57,7 +57,7 @@ export class CodexCliAdapter implements EngineAdapter {
         command: this.opts.codex.command,
         args,
         // CLAUDE.md 필수 규칙: spawn env는 반드시 buildEnv 결과만 쓴다.
-        env: buildEnv(this.profile, stripParentSessionEnv(process.env), this.opts.resolveKey),
+        env: buildEnv(this.profile, safeBaseEnv(process.env), this.opts.resolveKey),
         mapper,
       },
       req,

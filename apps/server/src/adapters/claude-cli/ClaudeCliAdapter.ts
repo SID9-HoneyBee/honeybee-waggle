@@ -7,7 +7,7 @@ import {
   type EngineAdapter,
   type RunRequest,
 } from "@honeybee-waggle/schema";
-import { stripParentSessionEnv } from "../../env/parentEnv";
+import { safeBaseEnv } from "../../env/baseEnv";
 import { runCliProcess } from "../cliProcess";
 import { ClaudeStreamMapper } from "./ClaudeStreamMapper";
 
@@ -55,7 +55,7 @@ export class ClaudeCliAdapter implements EngineAdapter {
         command: this.opts.claudeBin,
         args,
         // CLAUDE.md 필수 규칙: spawn env는 반드시 buildEnv 결과만 쓴다.
-        env: buildEnv(this.profile, stripParentSessionEnv(process.env), this.opts.resolveKey),
+        env: buildEnv(this.profile, safeBaseEnv(process.env), this.opts.resolveKey),
         mapper: new ClaudeStreamMapper(req.runId, this.profile.auth),
       },
       req,

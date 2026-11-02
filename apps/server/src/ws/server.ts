@@ -1,10 +1,11 @@
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import type { ClientMessage, ServerMessage } from "@honeybee-waggle/schema";
 import type { ProfileService } from "../profiles/ProfileService";
 import type { SessionManager } from "../session/SessionManager";
+import { SESSION_ID } from "../store/FileSessionStore";
 import type { ToolGateway } from "../tools/ToolGateway";
 
 interface WsServerOptions {
@@ -15,7 +16,8 @@ interface WsServerOptions {
 }
 
 // /files/<sessionId>/<파일명>. 두 부분 모두 엄격하게 제한해서 ../ 같은 경로 조작이 끼어들 틈을 없앤다.
-const FILE_ROUTE = /^\/files\/([0-9a-f-]{36})\/([A-Za-z0-9_-]+\.(png|jpg|webp))$/;
+// 세션 ID는 저장소와 같은 UUID 검사(SESSION_ID)를 다시 거친다. 형식이 느슨하면 저장소 쪽 검사에서 예외가 난다.
+const FILE_ROUTE = /^\/files\/([^/]+)\/([A-Za-z0-9_-]+\.(png|jpg|webp))$/;
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" };
 
 /**
@@ -31,15 +33,12 @@ export function startWsServer(
 ): WebSocketServer {
   // API 대화에서 생성한 이미지를 <img>로 띄우려면 HTTP 경로가 필요해서, WS를 HTTP 서버 위에 얹는다.
   // 파일명이 API가 준 긴 ID라 추측할 수 없고 127.0.0.1에만 열려 있어서 별도 인증은 두지 않는다.
+  // 이 핸들러에서 예외가 새면 서버 프로세스 전체가 죽는다(로컬의 아무 요청 하나로 서비스 중단). 모든 실패를 응답 코드로 끝낸다.
   const server = http.createServer((req, res) => {
-    const m = req.method === "GET" ? FILE_ROUTE.exec(req.url ?? "") : null;
-    const file = m ? path.join(opts.filesDir(m[1]!), m[2]!) : undefined;
-    if (!m || !file || !existsSync(file)) {
-      res.writeHead(404).end();
-      return;
-    }
-    res.writeHead(200, { "Content-Type": MIME[m[3]!]!, "Cache-Control": "private, max-age=31536000, immutable" });
-    createReadStream(file).pipe(res);
+    serveFile(req, res, opts.filesDir).catch(() => {
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
+    });
   });
   const wss = new WebSocketServer({
     server,
@@ -163,6 +162,38 @@ export function startWsServer(
   }
 
   return wss;
+}
+
+async function serveFile(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  filesDir: (sessionId: string) => string,
+): Promise<void> {
+  // WebSocket과 달리 <img> 요청에는 Origin 검사를 걸 수 없다. 대신 브라우저가 붙이는 Sec-Fetch-Site로
+  // 다른 사이트에서 이 서버의 파일을 끌어가는 요청을 막는다 (같은 PC의 웹 화면은 same-site로 온다).
+  if (req.headers["sec-fetch-site"] === "cross-site") {
+    res.writeHead(403).end();
+    return;
+  }
+  const m = req.method === "GET" ? FILE_ROUTE.exec(req.url ?? "") : null;
+  if (!m || !SESSION_ID.test(m[1]!)) {
+    res.writeHead(404).end();
+    return;
+  }
+  const file = path.join(filesDir(m[1]!), m[2]!);
+  const stat = await fs.stat(file).catch(() => null);
+  if (!stat?.isFile()) {
+    res.writeHead(404).end();
+    return;
+  }
+  const stream = createReadStream(file);
+  // 읽는 도중 파일이 사라지는 등의 오류도 처리하지 않으면 프로세스가 죽는다.
+  stream.on("error", () => {
+    if (!res.headersSent) res.writeHead(500);
+    res.end();
+  });
+  res.writeHead(200, { "Content-Type": MIME[m[3]!]!, "Cache-Control": "private, max-age=31536000, immutable" });
+  stream.pipe(res);
 }
 
 function send(ws: WebSocket, msg: ServerMessage): void {
