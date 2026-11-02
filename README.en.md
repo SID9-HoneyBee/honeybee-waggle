@@ -15,7 +15,7 @@ The goal: keep the subscriptions and the credits both working.
 > **Do not** put it behind Tailscale (Serve/Funnel), ngrok, Cloudflare Tunnel, a reverse proxy, or router port forwarding. Changing the bind address or Origin settings to allow outside access is just as dangerous. (The server refuses to start if `WAGGLE_WEB_ORIGINS` contains a non-local address.)
 > Authenticated remote access is being prepared for a [future update](#current-version-and-whats-next).
 
-![Session sharing](docs/images/session-sharing.png)
+![Session sharing](docs/images/en/session-sharing.png)
 
 ## Features
 
@@ -27,7 +27,7 @@ The goal: keep the subscriptions and the credits both working.
 | Claude API | Anthropic Messages API | Chat, file work in a connected folder |
 | GPT API | OpenAI Responses API | Chat, **image generation**, file work in a connected folder |
 
-![New session](docs/images/new-session.png)
+![New session](docs/images/en/new-session.png)
 
 ### Cross-session context sharing
 - Attach another session's conversation — including one from the other vendor's model — with the 📎 button.
@@ -55,7 +55,7 @@ The goal: keep the subscriptions and the credits both working.
 - Rename/delete sessions, conversation history stored locally (survives server restarts)
 - Interface language: English / 한국어 (switch with the EN·KO button at the bottom of the sidebar, or in Settings)
 
-![Settings](docs/images/settings.png)
+![Settings](docs/images/en/settings.png)
 
 ## Quick start
 
