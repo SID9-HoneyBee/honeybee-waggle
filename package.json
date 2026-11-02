@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel dev",
+    "build": "pnpm --filter @honeybee-waggle/web build",
+    "start": "pnpm -r --parallel start",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
