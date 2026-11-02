@@ -53,6 +53,7 @@ The goal: keep the subscriptions and the credits both working.
   - Cost is computed as tokens × list price. If a model with an unknown price answers, it's counted at the highest Opus price, so spend is never under-counted.
   - One in-flight response, or another session running at the same time, can still push slightly past the cap. Use it together with your console spending limits.
 - Rename/delete sessions, conversation history stored locally (survives server restarts)
+- Interface language: English / 한국어 (switch with the EN·KO button at the bottom of the sidebar, or in Settings)
 
 ![Settings](docs/images/settings.png)
 

@@ -3,32 +3,54 @@
 import { useState } from "react";
 import type { KeyProvider, ProfileInfo } from "@honeybee-waggle/schema";
 import { useDialog } from "@/lib/dialog";
+import { LANGS, useLanguage, useT, type MessageKey } from "@/lib/i18n";
 import { useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { ModeBadge } from "./ModeBadge";
 
-const PROVIDERS: { provider: KeyProvider; title: string; placeholder: string; note?: string }[] = [
-  { provider: "anthropic", title: "Anthropic API 키 (Claude API)", placeholder: "sk-ant-..." },
-  { provider: "openai", title: "OpenAI API 키 (GPT API)", placeholder: "sk-..." }
+const PROVIDERS: { provider: KeyProvider; title: MessageKey; placeholder: string }[] = [
+  { provider: "anthropic", title: "settings.anthropicKey", placeholder: "sk-ant-..." },
+  { provider: "openai", title: "settings.openaiKey", placeholder: "sk-..." },
 ];
 
 export function SettingsView() {
   const profiles = useWaggle((s) => s.profiles);
   const connected = useWaggle((s) => s.conn === "open");
+  const { lang, setLang, t } = useLanguage();
 
   return (
     <div className="w-full max-w-2xl space-y-10">
-      <h1 className="text-xl font-semibold">설정</h1>
+      <h1 className="text-xl font-semibold">{t("settings.title")}</h1>
+
+      <section className="space-y-3">
+        <h2 className="font-medium">{t("settings.language")}</h2>
+        <p className="text-sm text-neutral-500">{t("settings.languageDesc")}</p>
+        <div className="flex gap-2">
+          {LANGS.map((l) => (
+            <button
+              key={l.value}
+              type="button"
+              onClick={() => setLang(l.value)}
+              className={`rounded-md border px-3 py-1.5 text-sm ${
+                lang === l.value
+                  ? "border-neutral-900 bg-neutral-900 text-white dark:border-neutral-100 dark:bg-neutral-100 dark:text-neutral-900"
+                  : "border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              }`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="space-y-4">
-        <h2 className="font-medium">API 키</h2>
-        <p className="text-sm text-neutral-500">
-          키는 이 PC의 Windows 자격 증명 관리자에만 저장되고, 화면에는 끝 4자리만 다시 보여. 저장할 때 모델 목록을
-          받아보면서 키가 맞는지 확인해.
-        </p>
+        <h2 className="font-medium">{t("settings.apiKeys")}</h2>
+        <p className="text-sm text-neutral-500">{t("settings.apiKeysDesc")}</p>
         {PROVIDERS.map((p) => (
           <KeyRow
             key={p.provider}
-            {...p}
+            provider={p.provider}
+            title={t(p.title)}
+            placeholder={p.placeholder}
             hint={profiles.find((x) => x.keyProvider === p.provider)?.keyHint}
             disabled={!connected}
           />
@@ -36,7 +58,7 @@ export function SettingsView() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-medium">API 모델</h2>
+        <h2 className="font-medium">{t("settings.models")}</h2>
         {profiles
           .filter((p) => p.runtime === "chat")
           .map((p) => (
@@ -45,31 +67,24 @@ export function SettingsView() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="font-medium">월 예산</h2>
-        <p className="text-sm text-neutral-500">
-          이번 달 누적 비용이 예산에 닿으면 새 실행을 막고, 파일 작업 중이면 다음 API 호출 전에 멈춰. 비워두면 제한 없이
-          표시만 해. 진행 중인 응답 하나나 동시에 돌던 다른 세션만큼은 약간 넘을 수 있어.
-        </p>
+        <h2 className="font-medium">{t("settings.budget")}</h2>
+        <p className="text-sm text-neutral-500">{t("settings.budgetDesc")}</p>
         {profiles
           .filter((p) => p.costTracked)
           .map((p) => (
             <BudgetRow key={p.id} profile={p} disabled={!connected} />
           ))}
-        <p className="text-xs text-neutral-500">
-          Claude API 비용은 토큰 수 × 정가로 계산한 값이라 할인·크레딧은 반영되지 않아. 단가를 모르는 모델이 답하면
-          Opus 최고 단가로 넉넉하게 잡아. GPT API 예산은 다음 업데이트에서 지원할 예정이라 지금은 토큰 수만 보여줘. 각
-          콘솔(Anthropic / OpenAI)의 사용 한도도 같이 걸어두는 걸 추천해.
-        </p>
+        <p className="text-xs text-neutral-500">{t("settings.budgetNote")}</p>
       </section>
 
       <section className="space-y-3">
-        <h2 className="font-medium">실행 방식 상태</h2>
+        <h2 className="font-medium">{t("settings.status")}</h2>
         <ul className="divide-y divide-neutral-200 rounded-md border border-neutral-200 text-sm dark:divide-neutral-800 dark:border-neutral-800">
           {profiles.map((p) => (
             <li key={p.id} className="flex items-center gap-3 px-3 py-2">
               <ModeBadge profileId={p.id} />
               <span className={`flex-1 ${p.available ? "text-emerald-600" : "text-neutral-500"}`}>
-                {p.available ? "사용 가능" : p.unavailableReason}
+                {p.available ? t("settings.available") : p.unavailableReason}
               </span>
             </li>
           ))}
@@ -79,16 +94,10 @@ export function SettingsView() {
   );
 }
 
-function KeyRow(props: {
-  provider: KeyProvider;
-  title: string;
-  placeholder: string;
-  note?: string;
-  hint?: string;
-  disabled: boolean;
-}) {
+function KeyRow(props: { provider: KeyProvider; title: string; placeholder: string; hint?: string; disabled: boolean }) {
   const client = useWaggleClient();
   const dialog = useDialog();
+  const t = useT();
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string }>();
@@ -110,7 +119,9 @@ function KeyRow(props: {
     <div className="space-y-2 rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium">{props.title}</span>
-        <span className="font-mono text-xs text-neutral-500">{props.hint ? `등록됨 ${props.hint}` : "미등록"}</span>
+        <span className="font-mono text-xs text-neutral-500">
+          {props.hint ? t("settings.registered", { hint: props.hint }) : t("settings.notRegistered")}
+        </span>
       </div>
       <form
         className="flex gap-2"
@@ -119,7 +130,7 @@ function KeyRow(props: {
           // 저장 요청을 보낸 뒤에는 입력값을 바로 비운다. 화면 상태에 키 원문을 오래 들고 있을 이유가 없다.
           const value = key;
           setKey("");
-          void run(() => client.setKey(props.provider, value), "저장했어.");
+          void run(() => client.setKey(props.provider, value), t("settings.saved"));
         }}
       >
         <input
@@ -127,7 +138,7 @@ function KeyRow(props: {
           autoComplete="off"
           value={key}
           onChange={(e) => setKey(e.target.value)}
-          placeholder={props.hint ? "새 키로 교체" : props.placeholder}
+          placeholder={props.hint ? t("settings.replaceKey") : props.placeholder}
           className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-transparent px-3 py-1.5 font-mono text-sm dark:border-neutral-700"
         />
         <button
@@ -135,7 +146,7 @@ function KeyRow(props: {
           disabled={props.disabled || busy || !key.trim()}
           className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
         >
-          {busy ? "저장 중…" : "저장"}
+          {busy ? t("common.saving") : t("common.save")}
         </button>
         {props.hint && (
           <button
@@ -143,20 +154,19 @@ function KeyRow(props: {
             disabled={props.disabled || busy}
             onClick={async () => {
               const ok = await dialog.confirm({
-                title: "API 키를 삭제할까?",
-                message: "이 방식으로 만든 세션은 키를 다시 등록할 때까지 실행할 수 없어.",
+                title: t("settings.deleteKeyTitle"),
+                message: t("settings.deleteKeyMessage"),
                 tone: "danger",
-                confirmLabel: "삭제",
+                confirmLabel: t("common.delete"),
               });
-              if (ok) void run(() => client.deleteKey(props.provider), "삭제했어.");
+              if (ok) void run(() => client.deleteKey(props.provider), t("settings.deleted"));
             }}
             className="rounded-md border border-red-400 px-3 py-1.5 text-sm text-red-600 disabled:opacity-40"
           >
-            삭제
+            {t("common.delete")}
           </button>
         )}
       </form>
-      {props.note && <p className="text-xs text-neutral-500">{props.note}</p>}
       {message && (
         <p className={`text-xs ${message.ok ? "text-emerald-600" : "text-red-600 dark:text-red-400"}`}>{message.text}</p>
       )}
@@ -166,6 +176,7 @@ function KeyRow(props: {
 
 function ModelRow({ profile, disabled }: { profile: ProfileInfo; disabled: boolean }) {
   const client = useWaggleClient();
+  const t = useT();
   const [error, setError] = useState<string>();
   const options = profile.modelOptions ?? [];
 
@@ -191,7 +202,9 @@ function ModelRow({ profile, disabled }: { profile: ProfileInfo; disabled: boole
           ))}
         </select>
       ) : (
-        <span className="flex-1 text-neutral-500">{profile.keyHint ? "모델 목록 불러오는 중…" : "키를 등록하면 고를 수 있어"}</span>
+        <span className="flex-1 text-neutral-500">
+          {profile.keyHint ? t("settings.modelsLoading") : t("settings.modelsNeedKey")}
+        </span>
       )}
       {error && <span className="text-xs text-red-600">{error}</span>}
     </div>
@@ -200,6 +213,7 @@ function ModelRow({ profile, disabled }: { profile: ProfileInfo; disabled: boole
 
 function BudgetRow({ profile, disabled }: { profile: ProfileInfo; disabled: boolean }) {
   const client = useWaggleClient();
+  const t = useT();
   const [value, setValue] = useState(profile.budgetUsd?.toString() ?? "");
   const [error, setError] = useState<string>();
   const spent = profile.spentUsd ?? 0;
@@ -219,9 +233,9 @@ function BudgetRow({ profile, disabled }: { profile: ProfileInfo; disabled: bool
       <div className="flex items-center gap-3">
         <ModeBadge profileId={profile.id} />
         <span className={`flex-1 text-sm ${over ? "text-red-600" : "text-neutral-600 dark:text-neutral-400"}`}>
-          이번 달 ${spent.toFixed(2)}
-          {profile.budgetUsd !== undefined ? ` / $${profile.budgetUsd}` : " (예산 없음)"}
-          {over && " · 예산 초과로 실행 차단 중"}
+          {t("settings.spent", { spent: spent.toFixed(2) })}
+          {profile.budgetUsd !== undefined ? ` / $${profile.budgetUsd}` : t("settings.noBudget")}
+          {over && t("settings.overBudget")}
         </span>
       </div>
       <form
@@ -238,7 +252,7 @@ function BudgetRow({ profile, disabled }: { profile: ProfileInfo; disabled: bool
           step="0.01"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="제한 없음"
+          placeholder={t("settings.unlimited")}
           className="w-32 rounded-md border border-neutral-300 bg-transparent px-3 py-1.5 text-sm dark:border-neutral-700"
         />
         <button
@@ -246,7 +260,7 @@ function BudgetRow({ profile, disabled }: { profile: ProfileInfo; disabled: bool
           disabled={disabled}
           className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
         >
-          저장
+          {t("common.save")}
         </button>
       </form>
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}

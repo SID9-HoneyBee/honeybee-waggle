@@ -1,11 +1,13 @@
-export function formatRelative(ts: number): string {
+import type { Lang, Translate } from "./i18n";
+
+export function formatRelative(ts: number, t: Translate, lang: Lang): string {
   const sec = Math.round((Date.now() - ts) / 1000);
-  if (sec < 60) return "방금";
+  if (sec < 60) return t("time.justNow");
   const min = Math.round(sec / 60);
-  if (min < 60) return `${min}분 전`;
+  if (min < 60) return t("time.minutes", { n: min });
   const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}시간 전`;
-  return new Date(ts).toLocaleDateString("ko-KR");
+  if (hr < 24) return t("time.hours", { n: hr });
+  return new Date(ts).toLocaleDateString(lang === "ko" ? "ko-KR" : "en-US");
 }
 
 export function formatTokens(n: number | undefined): string {

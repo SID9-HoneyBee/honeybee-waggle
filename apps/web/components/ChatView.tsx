@@ -5,11 +5,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AttachedFile, AttachedRef, Engine, FileAttachment, HistoryEntry, ToolKind } from "@honeybee-waggle/schema";
 import { useDialog } from "@/lib/dialog";
+import { profileLabel, useT } from "@/lib/i18n";
 import { FILES_BASE, useSessionView, useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { MAX_FILES, MAX_TOTAL_FILE_CHARS, readTextFiles } from "@/lib/files";
 import { approxTokens, formatTokens } from "@/lib/format";
 import { ApprovalPanel } from "./ApprovalPanel";
-import { APPROVAL_LABEL, FolderConnect } from "./FolderConnect";
+import { APPROVAL_KEY, FolderConnect } from "./FolderConnect";
 import { ModeBadge } from "./ModeBadge";
 import { RefPicker } from "./RefPicker";
 import { ToolCard } from "./ToolCard";
@@ -31,17 +32,22 @@ type Item =
   | { type: "usage"; key: string; inputTokens?: number; outputTokens?: number; costUsd?: number }
   | { type: "end"; key: string; status: string; error?: string };
 
-const PERMISSION_LABEL = { "read-only": "읽기 전용", "workspace-write": "파일 수정 허용", full: "전체 허용" } as const;
+const PERMISSION_KEY = {
+  "read-only": "perm.read-only",
+  "workspace-write": "perm.workspace-write",
+  full: "perm.full",
+} as const;
 const VENDOR = { claude: "Anthropic", codex: "OpenAI" } as const;
 const CLI_NAME = { claude: "Claude Code", codex: "Codex" } as const;
-const CHANGE_LABEL = { add: "추가", modify: "수정", delete: "삭제" } as const;
-const END_LABEL: Record<string, string> = { error: "오류로 종료", cancelled: "중단됨", timeout: "시간 초과" };
+const CHANGE_KEY = { add: "change.add", modify: "change.modify", delete: "change.delete" } as const;
+const END_KEY = { error: "end.error", cancelled: "end.cancelled", timeout: "end.timeout" } as const;
 
 // 사용자가 위로 스크롤해서 예전 내용을 읽는 중이면 새 출력이 와도 끌어내리지 않는다.
 const STICK_THRESHOLD_PX = 80;
 
 export function ChatView({ sessionId }: { sessionId: string }) {
   const client = useWaggleClient();
+  const t = useT();
   const view = useSessionView(sessionId);
   const session = useWaggle((s) => s.sessions.find((x) => x.id === sessionId));
   const profile = useWaggle((s) => s.profiles.find((p) => p.id === session?.profileId));
@@ -64,17 +70,18 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   }, [items, view.streaming]);
 
   if (!session) {
-    return <div className="p-8 text-sm text-neutral-500">{connected ? "세션을 찾을 수 없어." : "불러오는 중…"}</div>;
+    return <div className="p-8 text-sm text-neutral-500">{connected ? t("chat.notFound") : t("chat.loading")}</div>;
   }
+  const label = profile ? profileLabel(t, profile.id, profile.label) : "";
 
   return (
     <>
       <header className="flex items-center gap-3 border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
         <div className="min-w-0 flex-1">
-          <h1 className="truncate font-semibold">{session.title || "(제목 없음)"}</h1>
+          <h1 className="truncate font-semibold">{session.title || t("common.untitled")}</h1>
           <p className="truncate font-mono text-xs text-neutral-500">
             {isChat
-              ? `API 대화 · ${profile?.model ?? ""}${session.cwd ? ` · 📁 ${session.cwd}` : ""}`
+              ? `${t("chat.apiChat")} · ${profile?.model ?? ""}${session.cwd ? ` · 📁 ${session.cwd}` : ""}`
               : session.cwd}
           </p>
         </div>
@@ -84,14 +91,14 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           <button
             onClick={() => setFolderOpen(true)}
             disabled={session.running}
-            title={session.running ? "실행 중에는 바꿀 수 없어" : undefined}
+            title={session.running ? t("chat.cantChangeRunning") : undefined}
             className="shrink-0 rounded-full border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
           >
-            {session.cwd ? `📁 ${APPROVAL_LABEL[session.approval ?? "writes"]}` : "📁 폴더 연결"}
+            {session.cwd ? `📁 ${t(APPROVAL_KEY[session.approval ?? "writes"])}` : t("chat.connectFolder")}
           </button>
         ) : (
           <span className="shrink-0 rounded-full border border-neutral-300 px-2 py-0.5 text-xs dark:border-neutral-700">
-            {PERMISSION_LABEL[session.permission]}
+            {t(PERMISSION_KEY[session.permission])}
           </span>
         )}
       </header>
@@ -106,12 +113,17 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         className="flex-1 overflow-y-auto"
       >
         <div className="mx-auto max-w-3xl space-y-3 px-5 py-6">
-          {!view.loaded && <p className="text-sm text-neutral-500">기록 불러오는 중…</p>}
+          {!view.loaded && <p className="text-sm text-neutral-500">{t("chat.loadingHistory")}</p>}
           {view.loaded && items.length === 0 && (
             <p className="text-sm text-neutral-500">
-              {profile?.runtime === "chat"
-                ? `첫 메시지를 보내면 ${profile.label}(${profile.model ?? "모델 미정"})와 대화가 시작돼. 파일이나 셸에는 접근하지 않아.`
-                : `첫 메시지를 보내면 이 폴더에서 ${profile ? `${CLI_NAME[profile.engine]}(${profile.label})` : "에이전트"}가 실행돼.`}
+              {isChat
+                ? t(session.cwd ? "chat.emptyChatFolder" : "chat.emptyChat", {
+                    label,
+                    model: profile?.model ?? t("chat.modelUnknown"),
+                  })
+                : profile
+                  ? t("chat.emptyAgent", { cli: CLI_NAME[profile.engine], label })
+                  : t("chat.emptyAgent", { cli: t("chat.agentFallback"), label: "" })}
             </p>
           )}
           {items.map((item) => (
@@ -119,7 +131,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           ))}
           {view.streaming && <Markdown text={view.streaming} />}
           {session.running && !view.streaming && (
-            <p className="animate-pulse text-sm text-neutral-500">작업 중…</p>
+            <p className="animate-pulse text-sm text-neutral-500">{t("chat.working")}</p>
           )}
         </div>
       </div>
@@ -145,6 +157,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
 }
 
 function ItemView({ item, sessionId }: { item: Item; sessionId: string }) {
+  const t = useT();
   switch (item.type) {
     case "user":
       return (
@@ -185,26 +198,26 @@ function ItemView({ item, sessionId }: { item: Item; sessionId: string }) {
         return (
           <a href={src} target="_blank" rel="noreferrer" className="block w-fit">
             {/* eslint-disable-next-line @next/next/no-img-element -- 로컬 서버가 주는 동적 파일이라 next/image 최적화 대상이 아니다 */}
-            <img src={src} alt="생성된 이미지" className="max-h-96 rounded-lg border border-neutral-200 dark:border-neutral-800" />
+            <img src={src} alt={t("chat.generatedImage")} className="max-h-96 rounded-lg border border-neutral-200 dark:border-neutral-800" />
           </a>
         );
       }
       return (
         <p className="font-mono text-xs text-neutral-500">
-          ✏️ {item.path} <span className="font-sans">({CHANGE_LABEL[item.change]})</span>
+          ✏️ {item.path} <span className="font-sans">({t(CHANGE_KEY[item.change])})</span>
         </p>
       );
     case "usage":
       return (
         <p className="text-right text-xs text-neutral-400">
-          입력 {formatTokens(item.inputTokens)} · 출력 {formatTokens(item.outputTokens)} 토큰
+          {t("chat.usage", { in: formatTokens(item.inputTokens), out: formatTokens(item.outputTokens) })}
           {item.costUsd !== undefined && ` · $${item.costUsd.toFixed(4)}`}
         </p>
       );
     case "end":
       return (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
-          {END_LABEL[item.status] ?? item.status}
+          {item.status in END_KEY ? t(END_KEY[item.status as keyof typeof END_KEY]) : item.status}
           {item.error && <span className="mt-1 block whitespace-pre-wrap font-mono text-xs">{item.error}</span>}
         </p>
       );
@@ -235,6 +248,7 @@ function Composer(props: {
   const [picking, setPicking] = useState(false);
   const profiles = useWaggle((s) => s.profiles);
   const dialog = useDialog();
+  const t = useT();
   // 입력 잠금 기준은 run.completed가 아니라 session.running이다. 완료 이벤트 직후에도 서버는
   // 프로세스 종료를 기다리는 중이라, 그 틈에 보내면 "아직 실행 중"으로 거절된다.
   const canSend = !props.disabled && !props.running && text.trim().length > 0;
@@ -248,12 +262,12 @@ function Composer(props: {
     });
     if (crossing.length > 0 && props.targetEngine) {
       const vendor = VENDOR[props.targetEngine];
-      const titles = crossing.map((r) => `"${r.title || "(제목 없음)"}"`).join(", ");
+      const titles = crossing.map((r) => `"${r.title || t("common.untitled")}"`).join(", ");
       const ok = await dialog.confirm({
-        title: `${vendor}로 전송할까?`,
-        message: `${titles} 세션의 대화 내용이 ${vendor}로 전송돼. 코드나 경로가 들어 있을 수 있어.`,
+        title: t("composer.sendToTitle", { vendor }),
+        message: t("composer.sendToMessage", { titles, vendor }),
         tone: "warning",
-        confirmLabel: "전송",
+        confirmLabel: t("composer.sendToConfirm"),
       });
       if (!ok) return;
     }
@@ -265,14 +279,14 @@ function Composer(props: {
   }
 
   async function addFiles(list: FileList) {
-    const { files: picked, rejected } = await readTextFiles(list);
+    const { files: picked, rejected } = await readTextFiles(list, t);
     const next = [...files, ...picked];
     const total = next.reduce((n, f) => n + f.content.length, 0);
-    if (next.length > MAX_FILES) rejected.push(`파일은 한 번에 ${MAX_FILES}개까지야`);
-    else if (total > MAX_TOTAL_FILE_CHARS) rejected.push(`합계가 ${MAX_TOTAL_FILE_CHARS.toLocaleString()}자를 넘어`);
+    if (next.length > MAX_FILES) rejected.push(t("composer.tooManyFiles", { n: MAX_FILES }));
+    else if (total > MAX_TOTAL_FILE_CHARS) rejected.push(t("composer.totalTooBig", { n: MAX_TOTAL_FILE_CHARS.toLocaleString() }));
     else setFiles(next);
     if (rejected.length > 0) {
-      await dialog.alert({ title: "첨부하지 못한 파일이 있어", message: rejected.join("\n"), tone: "warning" });
+      await dialog.alert({ title: t("composer.attachFailed"), message: rejected.join("\n"), tone: "warning" });
     }
   }
 
@@ -308,7 +322,7 @@ function Composer(props: {
       <div className="mx-auto flex max-w-3xl items-end gap-2">
         <button
           type="button"
-          title="다른 세션 참조"
+          title={t("composer.refButton")}
           onClick={() => setPicking((v) => !v)}
           disabled={props.disabled}
           className={`rounded-md border px-2.5 py-2 text-sm disabled:opacity-40 ${
@@ -319,7 +333,7 @@ function Composer(props: {
         </button>
         <button
           type="button"
-          title="파일 첨부 (텍스트 파일)"
+          title={t("composer.fileButton")}
           onClick={() => fileInputRef.current?.click()}
           disabled={props.disabled}
           className="rounded-md border border-neutral-300 px-2.5 py-2 text-sm disabled:opacity-40 dark:border-neutral-700"
@@ -348,7 +362,7 @@ function Composer(props: {
             }
           }}
           rows={Math.min(8, Math.max(2, text.split("\n").length))}
-          placeholder={props.running ? "실행 중… (끝나면 이어서 보낼 수 있어)" : "메시지 (Enter 전송, Shift+Enter 줄바꿈)"}
+          placeholder={props.running ? t("composer.placeholderRunning") : t("composer.placeholder")}
           className="flex-1 resize-none rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
         />
         {props.running ? (
@@ -356,7 +370,7 @@ function Composer(props: {
             onClick={props.onCancel}
             className="rounded-md border border-red-400 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
           >
-            중단
+            {t("composer.stop")}
           </button>
         ) : (
           <button
@@ -364,7 +378,7 @@ function Composer(props: {
             disabled={!canSend}
             className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
           >
-            보내기
+            {t("composer.send")}
           </button>
         )}
       </div>
@@ -427,15 +441,17 @@ function toItems(entries: HistoryEntry[]): Item[] {
 }
 
 function RefChip({ refInfo, onRemove }: { refInfo: AttachedRef; onRemove?: () => void }) {
+  const t = useT();
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-900">
-      📎 <span className="max-w-48 truncate">{refInfo.title || "(제목 없음)"}</span>
+      📎 <span className="max-w-48 truncate">{refInfo.title || t("common.untitled")}</span>
       <ModeBadge profileId={refInfo.profileId} />
       <span className="text-neutral-500">
-        {refInfo.includeTools ? "도구 포함" : "정리본"} · 약 {approxTokens(refInfo.chars).toLocaleString()}토큰
+        {refInfo.includeTools ? t("chip.withTools") : t("chip.transcript")} ·{" "}
+        {t("common.approxTokens", { n: approxTokens(refInfo.chars).toLocaleString() })}
       </span>
       {onRemove && (
-        <button type="button" onClick={onRemove} className="text-neutral-400 hover:text-red-600" aria-label="첨부 제거">
+        <button type="button" onClick={onRemove} className="text-neutral-400 hover:text-red-600" aria-label={t("common.removeAttachment")}>
           ✕
         </button>
       )}
@@ -444,12 +460,13 @@ function RefChip({ refInfo, onRemove }: { refInfo: AttachedRef; onRemove?: () =>
 }
 
 function FileChip({ name, chars, onRemove }: { name: string; chars: number; onRemove?: () => void }) {
+  const t = useT();
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-900">
       📄 <span className="max-w-48 truncate font-mono">{name}</span>
-      <span className="text-neutral-500">약 {approxTokens(chars).toLocaleString()}토큰</span>
+      <span className="text-neutral-500">{t("common.approxTokens", { n: approxTokens(chars).toLocaleString() })}</span>
       {onRemove && (
-        <button type="button" onClick={onRemove} className="text-neutral-400 hover:text-red-600" aria-label="첨부 제거">
+        <button type="button" onClick={onRemove} className="text-neutral-400 hover:text-red-600" aria-label={t("common.removeAttachment")}>
           ✕
         </button>
       )}

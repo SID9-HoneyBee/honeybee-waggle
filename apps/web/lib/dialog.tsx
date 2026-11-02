@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useT } from "./i18n";
 
 type Tone = "default" | "danger" | "warning";
 
@@ -78,6 +79,7 @@ export function useDialog(): DialogApi {
 }
 
 function DialogView({ req, onClose }: { req: Request; onClose: (value: boolean | string | null) => void }) {
+  const t = useT();
   const tone = req.opts.tone ?? "default";
   const [value, setValue] = useState(req.kind === "prompt" ? (req.opts.defaultValue ?? "") : "");
   const primaryRef = useRef<HTMLButtonElement>(null);
@@ -94,8 +96,8 @@ function DialogView({ req, onClose }: { req: Request; onClose: (value: boolean |
     return () => window.removeEventListener("keydown", onKey);
   }, [req, onClose]);
 
-  const confirmLabel = req.kind === "alert" ? "확인" : (req.opts.confirmLabel ?? "확인");
-  const cancelLabel = req.kind === "confirm" ? (req.opts.cancelLabel ?? "취소") : "취소";
+  const confirmLabel = req.kind === "alert" ? t("common.confirm") : (req.opts.confirmLabel ?? t("common.confirm"));
+  const cancelLabel = req.kind === "confirm" ? (req.opts.cancelLabel ?? t("common.cancel")) : t("common.cancel");
 
   return (
     <div

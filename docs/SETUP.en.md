@@ -11,7 +11,7 @@ You don't need all four modes. **Set up only the ones you want.** Modes that are
 | Claude API | Step 4 |
 | GPT API | Step 5 |
 
-> The app UI is currently in Korean. Menu names below are given with their Korean labels.
+> The app follows your browser language. To switch, use the **EN / KO** button at the bottom of the sidebar or **⚙ Settings → Language**. Some messages from the server (errors, unavailable reasons) are still in Korean.
 
 ---
 
@@ -63,7 +63,7 @@ Requires a ChatGPT plan that includes Codex (Plus, Pro, etc.).
 2. Check **billing / credits**. API calls fail without credits.
 3. **Set usage limits.** This is the most reliable protection against overspending.
 4. Create a key under **API Keys** and copy it. It is shown only once.
-5. Paste it into waggle under **⚙ 설정 (Settings) → API 키 → Anthropic API 키** and save.
+5. Paste it into waggle under **⚙ Settings → API keys → Anthropic API key** and save.
    - waggle fetches your model list while saving, which also validates the key. Invalid keys are not saved.
    - The key is stored in Windows Credential Manager. Only the last 4 characters are shown.
 6. On the same screen you can pick the **model** and a **monthly budget**.
@@ -74,7 +74,7 @@ Requires a ChatGPT plan that includes Codex (Plus, Pro, etc.).
 2. Check **billing / credits**.
 3. **Set usage limits.** A monthly budget cap for the GPT API is planned for a future update, so for now OpenAI's limits are how you control spending.
 4. Create a key under **API keys** and copy it.
-5. Paste it into waggle under **⚙ 설정 (Settings) → API 키 → OpenAI API 키** and save.
+5. Paste it into waggle under **⚙ Settings → API keys → OpenAI API key** and save.
 
 > Depending on your account, image generation may require OpenAI organization verification. If image generation fails with a permission error, check your organization settings on the OpenAI Platform.
 
@@ -88,16 +88,16 @@ pnpm build
 pnpm start
 ```
 
-Open **http://127.0.0.1:3000**. When the bottom-left corner shows "서버 연결됨" (server connected), you're ready.
+Open **http://127.0.0.1:3000**. When the bottom-left corner shows "Connected", you're ready.
 
 - Press `Ctrl + C` in the terminal to stop. Running jobs are cleaned up too.
 - If you're editing the code, use `pnpm dev` instead of `pnpm build` / `pnpm start`.
 
 ## 7. First steps
 
-1. Click **+ 새 세션** (new session) and pick a mode.
-   - Subscription modes: choose a working folder and a permission level. **"파일 수정 허용"** (allow file edits) is a good start.
-   - API modes: the chat starts right away. For file work, click **📁 폴더 연결** (connect folder) at the top right of the session.
+1. Click **+ New session** and pick a mode.
+   - Subscription modes: choose a working folder and a permission level. **"Allow file edits"** is a good start.
+   - API modes: the chat starts right away. For file work, click **📁 Connect folder** at the top right of the session.
 2. To carry over context from another session, click **📎** next to the input box and pick a session.
 3. To share specific files, attach them with **📄**. This uses far fewer tokens than connecting a whole folder.
 
@@ -116,12 +116,14 @@ Open **http://127.0.0.1:3000**. When the bottom-left corner shows "서버 연결
 
 ## Troubleshooting
 
+Messages from the server are currently shown in Korean. The English in parentheses below gives their meaning.
+
 | Symptom | What to check |
 |---|---|
 | "claude CLI를 찾지 못함" (claude CLI not found) | Make sure `claude --version` works in a terminal. If it does, set `CLAUDE_BIN` to the executable path |
 | GPT subscription says "codex login 필요" (login required) | Run `codex login` in a terminal |
 | "키 확인 실패" (key check failed) | Re-copy the key and confirm the console has billing/credits |
-| "연결 끊김" (disconnected) | Check the server terminal for errors and make sure nothing else is using port 4317 |
+| "Disconnected" in the sidebar | Check the server terminal for errors and make sure nothing else is using port 4317 |
 | Port already in use | Check whether waggle is already running. To change ports, set `WAGGLE_PORT`, `WAGGLE_WEB_ORIGINS`, and `NEXT_PUBLIC_WAGGLE_WS` together, then rebuild |
 | API session says "예산 초과" (over budget) | Raise or clear the monthly budget in ⚙ Settings |
 | Build-script warning during `pnpm install` | Allow `esbuild` with `pnpm approve-builds` |

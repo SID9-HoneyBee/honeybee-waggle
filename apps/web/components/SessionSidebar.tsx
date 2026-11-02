@@ -4,11 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { SessionSummary } from "@honeybee-waggle/schema";
 import { useDialog } from "@/lib/dialog";
+import { useLanguage } from "@/lib/i18n";
 import { useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { formatRelative } from "@/lib/format";
 import { ModeBadge } from "./ModeBadge";
 
-const CONN_LABEL = { connecting: "연결 중…", open: "서버 연결됨", closed: "연결 끊김 · 재시도 중" } as const;
+const CONN_KEY = { connecting: "conn.connecting", open: "conn.open", closed: "conn.closed" } as const;
 const CONN_DOT = { connecting: "bg-amber-400", open: "bg-emerald-500", closed: "bg-red-500" } as const;
 
 export function SessionSidebar() {
@@ -16,15 +17,17 @@ export function SessionSidebar() {
   const router = useRouter();
   const client = useWaggleClient();
   const dialog = useDialog();
+  const { lang, setLang, t } = useLanguage();
   const sessions = useWaggle((s) => s.sessions);
   const conn = useWaggle((s) => s.conn);
 
   async function remove(s: SessionSummary) {
+    const title = s.title || t("common.untitled");
     const ok = await dialog.confirm({
-      title: "세션을 삭제할까?",
-      message: `"${s.title || "(제목 없음)"}" 세션과 대화 기록이 지워져.${s.running ? "\n실행 중인 작업은 중단돼." : ""}`,
+      title: t("sidebar.deleteTitle"),
+      message: `${t("sidebar.deleteMessage", { title })}${s.running ? `\n${t("sidebar.deleteRunning")}` : ""}`,
       tone: "danger",
-      confirmLabel: "삭제",
+      confirmLabel: t("common.delete"),
     });
     if (!ok) return;
     try {
@@ -32,17 +35,21 @@ export function SessionSidebar() {
       // 지금 보고 있던 세션이면 빈 화면("세션을 찾을 수 없어")에 남지 않게 새 세션 화면으로 보낸다.
       if (pathname === `/sessions/${s.id}`) router.push("/");
     } catch (err) {
-      await dialog.alert({ title: "삭제하지 못했어", message: errorText(err), tone: "danger" });
+      await dialog.alert({ title: t("sidebar.deleteFailed"), message: errorText(err), tone: "danger" });
     }
   }
 
   async function rename(s: SessionSummary) {
-    const title = await dialog.prompt({ title: "세션 제목 변경", defaultValue: s.title, confirmLabel: "변경" });
+    const title = await dialog.prompt({
+      title: t("sidebar.renameTitle"),
+      defaultValue: s.title,
+      confirmLabel: t("sidebar.renameConfirm"),
+    });
     if (title === null || title.trim() === s.title) return;
     try {
       await client.renameSession(s.id, title);
     } catch (err) {
-      await dialog.alert({ title: "제목을 바꾸지 못했어", message: errorText(err), tone: "danger" });
+      await dialog.alert({ title: t("sidebar.renameFailed"), message: errorText(err), tone: "danger" });
     }
   }
 
@@ -54,13 +61,13 @@ export function SessionSidebar() {
           href="/"
           className="rounded-md bg-neutral-900 px-2.5 py-1 text-sm text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
         >
-          + 새 세션
+          {t("sidebar.newSession")}
         </Link>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-2">
         {sessions.length === 0 && conn === "open" && (
-          <p className="px-2 py-4 text-sm text-neutral-500">아직 세션이 없어.</p>
+          <p className="px-2 py-4 text-sm text-neutral-500">{t("sidebar.empty")}</p>
         )}
         {sessions.map((s) => {
           const active = pathname === `/sessions/${s.id}`;
@@ -77,18 +84,20 @@ export function SessionSidebar() {
               }`}
             >
               <div className="flex items-center gap-1.5">
-                {s.running && <span className="size-2 shrink-0 animate-pulse rounded-full bg-emerald-500" title="실행 중" />}
-                <span className="min-w-0 flex-1 truncate">{s.title || "(제목 없음)"}</span>
+                {s.running && (
+                  <span className="size-2 shrink-0 animate-pulse rounded-full bg-emerald-500" title={t("sidebar.running")} />
+                )}
+                <span className="min-w-0 flex-1 truncate">{s.title || t("common.untitled")}</span>
                 <ModeBadge profileId={s.profileId} />
-                <ItemButton label="제목 변경" onClick={() => void rename(s)}>
+                <ItemButton label={t("sidebar.rename")} onClick={() => void rename(s)}>
                   ✎
                 </ItemButton>
-                <ItemButton label="세션 삭제" danger onClick={() => void remove(s)}>
+                <ItemButton label={t("sidebar.delete")} danger onClick={() => void remove(s)}>
                   ✕
                 </ItemButton>
               </div>
               <div className="mt-0.5 truncate text-xs text-neutral-500">
-                {formatRelative(s.updatedAt)} · {s.cwd || "API 대화"}
+                {formatRelative(s.updatedAt, t, lang)} · {s.cwd || t("sidebar.apiChat")}
               </div>
             </Link>
           );
@@ -97,14 +106,23 @@ export function SessionSidebar() {
 
       <div className="flex items-center gap-2 border-t border-neutral-200 px-4 py-2 text-xs text-neutral-500 dark:border-neutral-800">
         <span className={`size-2 rounded-full ${CONN_DOT[conn]}`} />
-        <span className="flex-1">{CONN_LABEL[conn]}</span>
+        <span className="flex-1">{t(CONN_KEY[conn])}</span>
+        {/* 설정 화면까지 가지 않고 바로 바꿀 수 있게 둔다. 현재 언어가 아니라 바꿀 언어를 보여줘야 누를 이유가 분명하다 */}
+        <button
+          type="button"
+          title={t("sidebar.switchLang")}
+          onClick={() => setLang(lang === "ko" ? "en" : "ko")}
+          className="rounded px-1.5 py-0.5 font-medium hover:bg-neutral-200 dark:hover:bg-neutral-800"
+        >
+          {lang === "ko" ? "EN" : "KO"}
+        </button>
         <Link
           href="/settings"
           className={`rounded px-1.5 py-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-800 ${
             pathname === "/settings" ? "bg-neutral-200 dark:bg-neutral-800" : ""
           }`}
         >
-          ⚙ 설정
+          {t("sidebar.settings")}
         </Link>
       </div>
     </aside>

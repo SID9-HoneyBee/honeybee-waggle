@@ -3,19 +3,16 @@
 import { useState } from "react";
 import type { ApprovalPolicy, SessionSummary } from "@honeybee-waggle/schema";
 import { useDialog } from "@/lib/dialog";
+import { useT } from "@/lib/i18n";
 import { useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 
-export const APPROVAL_LABEL: Record<ApprovalPolicy, string> = {
-  writes: "수정만 확인",
-  all: "매번 확인",
-  none: "모두 자동",
-};
-
-const APPROVAL_OPTIONS: { value: ApprovalPolicy; desc: string }[] = [
-  { value: "writes", desc: "읽기는 자동, 파일을 고칠 때만 변경 내용을 보여주고 물어봐." },
-  { value: "all", desc: "파일 목록·읽기까지 전부 물어봐." },
-  { value: "none", desc: "묻지 않고 실행해. 연결 폴더 밖으로는 여전히 못 나가." },
-];
+export const APPROVAL_KEY = { writes: "approval.writes", all: "approval.all", none: "approval.none" } as const;
+const APPROVAL_DESC_KEY = {
+  writes: "approval.writes.desc",
+  all: "approval.all.desc",
+  none: "approval.none.desc",
+} as const;
+const APPROVAL_ORDER: ApprovalPolicy[] = ["writes", "all", "none"];
 
 /**
  * API 세션에 폴더를 연결하는 창. 폴더는 직접 입력하거나, 다른 세션의 작업 폴더에서 고른다.
@@ -24,6 +21,7 @@ const APPROVAL_OPTIONS: { value: ApprovalPolicy; desc: string }[] = [
 export function FolderConnect({ session, onClose }: { session: SessionSummary; onClose: () => void }) {
   const client = useWaggleClient();
   const dialog = useDialog();
+  const t = useT();
   const sessions = useWaggle((s) => s.sessions);
   const [folder, setFolder] = useState(session.cwd);
   const [approval, setApproval] = useState<ApprovalPolicy>(session.approval ?? "writes");
@@ -35,13 +33,11 @@ export function FolderConnect({ session, onClose }: { session: SessionSummary; o
   async function save(next: string | null) {
     if (next !== null) {
       const ok = await dialog.confirm({
-        title: "폴더 전체를 연결할까?",
-        message:
-          "폴더를 연결하면 모델이 필요한 파일을 찾느라 여러 파일을 읽으면서 토큰을 많이 쓸 수 있어.\n" +
-          "고칠 파일이 정해져 있다면 입력창의 📄 파일 첨부로 그 파일만 붙이는 걸 권장해.",
+        title: t("folder.warnTitle"),
+        message: t("folder.warnMessage"),
         tone: "warning",
-        confirmLabel: "그래도 연결",
-        cancelLabel: "돌아가기",
+        confirmLabel: t("folder.warnConfirm"),
+        cancelLabel: t("folder.warnCancel"),
       });
       if (!ok) return;
     }
@@ -68,13 +64,11 @@ export function FolderConnect({ session, onClose }: { session: SessionSummary; o
         }}
         className="w-full max-w-lg space-y-4 rounded-xl border border-neutral-200 bg-white p-5 shadow-xl dark:border-neutral-800 dark:bg-neutral-900"
       >
-        <h2 className="font-semibold">📁 폴더 연결</h2>
-        <p className="text-sm text-neutral-500">
-          연결한 폴더 안에서만 파일 목록·읽기·수정을 할 수 있어. 셸 명령은 실행하지 않아.
-        </p>
+        <h2 className="font-semibold">{t("folder.title")}</h2>
+        <p className="text-sm text-neutral-500">{t("folder.desc")}</p>
 
         <label className="block space-y-1">
-          <span className="text-sm font-medium">폴더 경로</span>
+          <span className="text-sm font-medium">{t("folder.path")}</span>
           <input
             required
             value={folder}
@@ -99,13 +93,13 @@ export function FolderConnect({ session, onClose }: { session: SessionSummary; o
         )}
 
         <fieldset className="space-y-1.5">
-          <legend className="mb-1 text-sm font-medium">승인 방식</legend>
-          {APPROVAL_OPTIONS.map((o) => (
-            <label key={o.value} className="flex cursor-pointer gap-2 text-sm">
-              <input type="radio" name="approval" checked={approval === o.value} onChange={() => setApproval(o.value)} className="mt-1" />
+          <legend className="mb-1 text-sm font-medium">{t("folder.approval")}</legend>
+          {APPROVAL_ORDER.map((value) => (
+            <label key={value} className="flex cursor-pointer gap-2 text-sm">
+              <input type="radio" name="approval" checked={approval === value} onChange={() => setApproval(value)} className="mt-1" />
               <span>
-                <span className="font-medium">{APPROVAL_LABEL[o.value]}</span>
-                <span className="block text-neutral-500">{o.desc}</span>
+                <span className="font-medium">{t(APPROVAL_KEY[value])}</span>
+                <span className="block text-neutral-500">{t(APPROVAL_DESC_KEY[value])}</span>
               </span>
             </label>
           ))}
@@ -121,7 +115,7 @@ export function FolderConnect({ session, onClose }: { session: SessionSummary; o
               onClick={() => void save(null)}
               className="rounded-md border border-red-400 px-3 py-1.5 text-sm text-red-600 disabled:opacity-40"
             >
-              연결 해제
+              {t("folder.disconnect")}
             </button>
           ) : (
             <span />
@@ -132,14 +126,14 @@ export function FolderConnect({ session, onClose }: { session: SessionSummary; o
               onClick={onClose}
               className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
             >
-              취소
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
               disabled={busy || !folder.trim()}
               className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
             >
-              연결
+              {t("folder.connect")}
             </button>
           </div>
         </div>

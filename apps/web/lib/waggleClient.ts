@@ -11,6 +11,7 @@ import type {
   ServerMessage,
   SessionSummary,
 } from "@honeybee-waggle/schema";
+import { translate, type Lang } from "./i18n";
 
 export type ConnState = "connecting" | "open" | "closed";
 
@@ -57,8 +58,14 @@ export class WaggleClient {
   private disposed = false;
   private reqSeq = 0;
   private noticeSeq = 0;
+  // React 밖에서 만드는 에러·알림 문구도 화면 언어를 따라야 해서, Provider가 언어가 바뀔 때마다 넣어준다.
+  private lang: Lang = "ko";
 
   constructor(private readonly url: string) {}
+
+  setLang(lang: Lang): void {
+    this.lang = lang;
+  }
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -88,7 +95,7 @@ export class WaggleClient {
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.set({ conn: "closed" });
-      for (const p of this.pending.values()) p.reject(new Error("서버 연결이 끊어짐"));
+      for (const p of this.pending.values()) p.reject(new Error(translate(this.lang, "client.disconnected")));
       this.pending.clear();
       if (this.disposed) return;
       // 서버 재시작 중일 때 1초 간격으로 계속 두드리지 않도록 간격을 늘려가며 재시도한다.
@@ -167,7 +174,7 @@ export class WaggleClient {
 
   sendMessage(sessionId: string, text: string, refs?: SessionRef[], files?: FileAttachment[]): void {
     if (!this.rawSend({ type: "run.send", reqId: this.nextReqId(), sessionId, text, refs, files })) {
-      this.notify("서버에 연결되어 있지 않아 보내지 못했어.");
+      this.notify(translate(this.lang, "client.notConnectedSend"));
     }
   }
 
@@ -292,7 +299,7 @@ export class WaggleClient {
     const reqId = this.nextReqId();
     return new Promise((resolve, reject) => {
       if (!this.rawSend({ ...msg, reqId })) {
-        reject(new Error("서버에 연결되어 있지 않음"));
+        reject(new Error(translate(this.lang, "client.notConnected")));
         return;
       }
       this.pending.set(reqId, { resolve, reject });

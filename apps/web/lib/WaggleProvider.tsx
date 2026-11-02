@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { useLanguage } from "./i18n";
 import { emptyView, WaggleClient, type Snapshot } from "./waggleClient";
 
 const WS_URL = process.env.NEXT_PUBLIC_WAGGLE_WS ?? "ws://127.0.0.1:4317";
@@ -14,11 +15,16 @@ const SERVER_SNAPSHOT: Snapshot = { conn: "connecting", sessions: [], profiles: 
 
 export function WaggleProvider({ children }: { children: React.ReactNode }) {
   const [client] = useState(() => new WaggleClient(WS_URL));
+  const { lang } = useLanguage();
 
   useEffect(() => {
     client.connect();
     return () => client.dispose();
   }, [client]);
+
+  useEffect(() => {
+    client.setLang(lang);
+  }, [client, lang]);
 
   return <ClientContext.Provider value={client}>{children}</ClientContext.Provider>;
 }

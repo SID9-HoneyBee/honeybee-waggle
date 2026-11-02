@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { AttachedRef } from "@honeybee-waggle/schema";
+import { useT } from "@/lib/i18n";
 import { useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { approxTokens } from "@/lib/format";
 import { ModeBadge } from "./ModeBadge";
@@ -19,6 +20,7 @@ interface Props {
  */
 export function RefPicker({ currentSessionId, attachedIds, onAttach, onClose }: Props) {
   const client = useWaggleClient();
+  const t = useT();
   const sessions = useWaggle((s) => s.sessions.filter((x) => x.id !== currentSessionId && !attachedIds.includes(x.id)));
   const [selectedId, setSelectedId] = useState<string>();
   const [includeTools, setIncludeTools] = useState(false);
@@ -44,14 +46,14 @@ export function RefPicker({ currentSessionId, attachedIds, onAttach, onClose }: 
   return (
     <div className="mx-auto mb-2 max-w-3xl rounded-md border border-neutral-300 bg-white p-3 text-sm shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-medium">다른 세션 참조</span>
-        <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700" aria-label="닫기">
+        <span className="font-medium">{t("ref.title")}</span>
+        <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700" aria-label={t("common.close")}>
           ✕
         </button>
       </div>
 
       {sessions.length === 0 ? (
-        <p className="text-neutral-500">첨부할 수 있는 다른 세션이 없어.</p>
+        <p className="text-neutral-500">{t("ref.none")}</p>
       ) : (
         <ul className="max-h-40 space-y-0.5 overflow-y-auto">
           {sessions.map((s) => (
@@ -62,7 +64,7 @@ export function RefPicker({ currentSessionId, attachedIds, onAttach, onClose }: 
                   s.id === selectedId ? "bg-neutral-200 dark:bg-neutral-800" : "hover:bg-neutral-100 dark:hover:bg-neutral-800/60"
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{s.title || "(제목 없음)"}</span>
+                <span className="min-w-0 flex-1 truncate">{s.title || t("common.untitled")}</span>
                 <ModeBadge profileId={s.profileId} />
               </button>
             </li>
@@ -75,15 +77,18 @@ export function RefPicker({ currentSessionId, attachedIds, onAttach, onClose }: 
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={includeTools} onChange={(e) => setIncludeTools(e.target.checked)} />
             <span>
-              도구 과정 포함 <span className="text-neutral-500">(어떤 파일을 읽고 고쳤는지까지. 출력은 앞부분만)</span>
+              {t("ref.includeTools")} <span className="text-neutral-500">{t("ref.includeToolsHint")}</span>
             </span>
           </label>
           {error && <p className="text-red-600">{error}</p>}
-          {!preview && !error && <p className="text-neutral-500">미리보기 만드는 중…</p>}
+          {!preview && !error && <p className="text-neutral-500">{t("ref.building")}</p>}
           {preview && (
             <>
               <p className="text-neutral-500">
-                {preview.chars.toLocaleString()}자 · 약 {approxTokens(preview.chars).toLocaleString()} 토큰
+                {t("ref.size", {
+                  chars: preview.chars.toLocaleString(),
+                  tokens: approxTokens(preview.chars).toLocaleString(),
+                })}
               </p>
               <pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded bg-neutral-50 p-2 text-xs dark:bg-neutral-950">
                 {preview.text}
@@ -100,7 +105,7 @@ export function RefPicker({ currentSessionId, attachedIds, onAttach, onClose }: 
                 }
                 className="rounded-md bg-neutral-900 px-3 py-1.5 text-white dark:bg-neutral-100 dark:text-neutral-900"
               >
-                첨부
+                {t("ref.attach")}
               </button>
             </>
           )}

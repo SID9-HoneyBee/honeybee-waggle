@@ -4,30 +4,27 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { PermissionLevel } from "@honeybee-waggle/schema";
+import { useT } from "@/lib/i18n";
 import { useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
 import { ModeBadge } from "./ModeBadge";
 
 const LAST_CWD_KEY = "waggle:lastCwd";
 const LAST_PROFILE_KEY = "waggle:lastProfile";
 
-// 같은 권한 단계라도 엔진마다 실제 플래그가 다르다(스키마 PERMISSION_FLAGS). 둘 다 적어둬야 고를 때 헷갈리지 않는다.
-const PERMISSIONS: { value: PermissionLevel; label: string; desc: string }[] = [
-  { value: "read-only", label: "읽기 전용", desc: "파일을 읽고 계획만 세운다. (Claude plan 모드 / GPT read-only 샌드박스)" },
-  {
-    value: "workspace-write",
-    label: "파일 수정 허용",
-    desc: "작업 폴더 안 파일 수정 허용. (Claude acceptEdits / GPT workspace-write)",
-  },
-  {
-    value: "full",
-    label: "전체 허용",
-    desc: "셸 포함 모든 도구를 묻지 않고 실행한다. 주의. (Claude bypassPermissions / GPT danger-full-access)",
-  },
-];
+// 같은 권한 단계라도 엔진마다 실제 플래그가 다르다(스키마 PERMISSION_FLAGS). 설명에 둘 다 적어둬야 고를 때 헷갈리지 않는다.
+const PERMISSIONS = [
+  { value: "read-only", label: "perm.read-only", desc: "perm.read-only.desc" },
+  { value: "workspace-write", label: "perm.workspace-write", desc: "perm.workspace-write.desc" },
+  { value: "full", label: "perm.full", desc: "perm.full.desc" },
+] as const satisfies readonly { value: PermissionLevel; label: string; desc: string }[];
+
+// 서버가 보내는 사용 불가 사유는 한국어 고정이다. 키 미등록 안내 링크를 띄울지는 이 원문으로 판단한다.
+const NO_KEY_REASON = "API 키 미등록";
 
 export function NewSessionForm() {
   const client = useWaggleClient();
   const router = useRouter();
+  const t = useT();
   const connected = useWaggle((s) => s.conn === "open");
   const profiles = useWaggle((s) => s.profiles);
   const [profileId, setProfileId] = useState("claude-sub");
@@ -71,10 +68,10 @@ export function NewSessionForm() {
 
   return (
     <form onSubmit={submit} className="w-full max-w-xl space-y-5">
-      <h1 className="text-xl font-semibold">새 세션</h1>
+      <h1 className="text-xl font-semibold">{t("new.title")}</h1>
 
       <fieldset className="space-y-2">
-        <legend className="mb-1 text-sm font-medium">실행 방식</legend>
+        <legend className="mb-1 text-sm font-medium">{t("new.mode")}</legend>
         <div className="grid grid-cols-2 gap-2">
           {profiles.map((p) => (
             <label
@@ -96,41 +93,41 @@ export function NewSessionForm() {
                 <span className="block text-xs text-neutral-500">
                   {p.available
                     ? p.runtime === "chat"
-                      ? `API 대화 · ${p.model ?? ""}`
-                      : "에이전트 · 구독 한도 사용"
+                      ? t("new.chatDesc", { model: p.model ?? "" })
+                      : t("new.agentDesc")
                     : p.unavailableReason}
                 </span>
               </span>
             </label>
           ))}
         </div>
-        {profiles.some((p) => p.unavailableReason === "API 키 미등록") && (
+        {profiles.some((p) => p.unavailableReason === NO_KEY_REASON) && (
           <p className="text-xs text-neutral-500">
-            API 방식은{" "}
+            {t("new.keyHintBefore")}
             <Link href="/settings" className="underline">
-              설정
+              {t("new.keyHintLink")}
             </Link>
-            에서 키를 등록하면 쓸 수 있어.
+            {t("new.keyHintAfter")}
           </p>
         )}
       </fieldset>
 
       {!isChat && (
-      <label className="block space-y-1">
-        <span className="text-sm font-medium">작업 폴더 (cwd)</span>
-        <input
-          required
-          value={cwd}
-          onChange={(e) => setCwd(e.target.value)}
-          placeholder="C:\Projects\my-app"
-          className="w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 font-mono text-sm dark:border-neutral-700"
-        />
-      </label>
+        <label className="block space-y-1">
+          <span className="text-sm font-medium">{t("new.cwd")}</span>
+          <input
+            required
+            value={cwd}
+            onChange={(e) => setCwd(e.target.value)}
+            placeholder="C:\Projects\my-app"
+            className="w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 font-mono text-sm dark:border-neutral-700"
+          />
+        </label>
       )}
 
       <label className="block space-y-1">
         <span className="text-sm font-medium">
-          제목 <span className="font-normal text-neutral-500">(비워두면 첫 메시지로 자동)</span>
+          {t("new.titleLabel")} <span className="font-normal text-neutral-500">{t("new.titleHint")}</span>
         </span>
         <input
           value={title}
@@ -140,31 +137,31 @@ export function NewSessionForm() {
       </label>
 
       {!isChat && (
-      <fieldset className="space-y-2">
-        <legend className="mb-1 text-sm font-medium">권한</legend>
-        {PERMISSIONS.map((p) => (
-          <label
-            key={p.value}
-            className={`flex cursor-pointer gap-3 rounded-md border px-3 py-2 text-sm ${
-              permission === p.value
-                ? "border-neutral-900 dark:border-neutral-100"
-                : "border-neutral-300 dark:border-neutral-700"
-            }`}
-          >
-            <input
-              type="radio"
-              name="permission"
-              checked={permission === p.value}
-              onChange={() => setPermission(p.value)}
-              className="mt-1"
-            />
-            <span>
-              <span className="font-medium">{p.label}</span>
-              <span className="block text-neutral-500">{p.desc}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-sm font-medium">{t("new.permission")}</legend>
+          {PERMISSIONS.map((p) => (
+            <label
+              key={p.value}
+              className={`flex cursor-pointer gap-3 rounded-md border px-3 py-2 text-sm ${
+                permission === p.value
+                  ? "border-neutral-900 dark:border-neutral-100"
+                  : "border-neutral-300 dark:border-neutral-700"
+              }`}
+            >
+              <input
+                type="radio"
+                name="permission"
+                checked={permission === p.value}
+                onChange={() => setPermission(p.value)}
+                className="mt-1"
+              />
+              <span>
+                <span className="font-medium">{t(p.label)}</span>
+                <span className="block text-neutral-500">{t(p.desc)}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
       )}
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
@@ -174,7 +171,7 @@ export function NewSessionForm() {
         disabled={!connected || busy || (!isChat && !cwd.trim()) || !usable}
         className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
       >
-        {connected ? "세션 만들기" : "서버 연결 대기 중…"}
+        {connected ? t("new.create") : t("new.waiting")}
       </button>
     </form>
   );
