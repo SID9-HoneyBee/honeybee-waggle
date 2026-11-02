@@ -15,6 +15,7 @@ import type { FileSessionStore } from "../store/FileSessionStore";
 interface ManagerEvents {
   updated: [SessionSummary];
   entry: [sessionId: string, entry: HistoryEntry];
+  removed: [sessionId: string];
 }
 
 const TITLE_MAX = 40;
@@ -28,6 +29,9 @@ const TITLE_MAX = 40;
 export class SessionManager extends EventEmitter<ManagerEvents> {
   private readonly sessions = new Map<string, SessionMeta>();
   private readonly running = new Map<string, AbortController>();
+  /** 삭제 시 진행 중인 run이 기록·meta 쓰기를 다 끝낼 때까지 기다리기 위해 들고 있는다 */
+  private readonly executions = new Map<string, Promise<void>>();
+  private readonly deleting = new Set<string>();
   /** 세션별 마지막 저장 seq. 시작 시 기록 줄 수로 복원한다 */
   private readonly seqs = new Map<string, number>();
 
@@ -96,6 +100,7 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
   send(sessionId: string, text: string): string {
     const meta = this.require(sessionId);
     if (!text.trim()) throw new Error("빈 메시지는 보낼 수 없음");
+    if (this.deleting.has(sessionId)) throw new Error("삭제 중인 세션");
     if (this.running.has(sessionId)) throw new Error("이 세션은 아직 실행 중. 끝나거나 중단한 뒤에 보내줘.");
     // 세션을 만든 뒤 키가 삭제됐거나 이번 달 예산을 넘겼을 수 있어서 보낼 때마다 다시 검사한다.
     this.profiles.assertCanRun(meta.profileId);
@@ -107,13 +112,38 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     this.touch(meta);
 
     // run은 길게 돌 수 있어서 기다리지 않는다. 결과는 entry 이벤트로 흘려보낸다.
-    void this.execute(meta, runId, text, ac);
+    const execution = this.execute(meta, runId, text, ac);
+    this.executions.set(sessionId, execution);
+    void execution.finally(() => {
+      if (this.executions.get(sessionId) === execution) this.executions.delete(sessionId);
+    });
     return runId;
   }
 
   cancel(sessionId: string): void {
     this.require(sessionId);
     this.running.get(sessionId)?.abort();
+  }
+
+  /**
+   * 우리 쪽 기록(.data/sessions/<id>)만 지운다. CLI가 자체 보관하는 대화(~/.claude, ~/.codex)는 건드리지 않는다.
+   * 그건 사용자의 다른 도구(터미널의 claude --resume 등)에서도 쓰는 데이터라서다.
+   * 실행 중이면 중단시키고, run이 마지막 기록을 다 쓴 뒤에 폴더를 지운다. 순서가 바뀌면 지운 폴더에 다시 써서 되살아난다.
+   */
+  async delete(sessionId: string): Promise<void> {
+    this.require(sessionId);
+    if (this.deleting.has(sessionId)) return;
+    this.deleting.add(sessionId);
+    try {
+      this.running.get(sessionId)?.abort();
+      await this.executions.get(sessionId);
+      await this.store.deleteSession(sessionId);
+      this.sessions.delete(sessionId);
+      this.seqs.delete(sessionId);
+      this.emit("removed", sessionId);
+    } finally {
+      this.deleting.delete(sessionId);
+    }
   }
 
   cancelAll(): void {

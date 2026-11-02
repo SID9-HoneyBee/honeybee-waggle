@@ -122,6 +122,10 @@ export class WaggleClient {
     return this.request({ type: "session.create", ...input }) as Promise<SessionSummary>;
   }
 
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.request({ type: "session.delete", sessionId });
+  }
+
   async setKey(provider: KeyProvider, key: string): Promise<void> {
     await this.request({ type: "settings.setKey", provider, key });
   }
@@ -166,6 +170,12 @@ export class WaggleClient {
       case "session.updated":
         this.upsertSession(msg.session);
         return;
+      case "session.removed": {
+        const { [msg.sessionId]: _removed, ...views } = this.snapshot.views;
+        this.openCounts.delete(msg.sessionId);
+        this.set({ sessions: this.snapshot.sessions.filter((s) => s.id !== msg.sessionId), views });
+        return;
+      }
       case "session.history": {
         const prev = this.snapshot.views[msg.sessionId] ?? EMPTY_VIEW;
         const lastSeq = msg.entries.reduce((m, e) => Math.max(m, e.seq ?? 0), 0);

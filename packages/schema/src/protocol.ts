@@ -52,6 +52,7 @@ export type ClientMessage = { reqId?: string } & (
   | { type: "session.create"; title?: string; cwd: string; permission: PermissionLevel; profileId: string }
   | { type: "session.open"; sessionId: string }
   | { type: "session.close"; sessionId: string }
+  | { type: "session.delete"; sessionId: string }
   | { type: "run.send"; sessionId: string; text: string }
   | { type: "run.cancel"; sessionId: string }
   | { type: "profile.list" }
@@ -66,6 +67,7 @@ export type ServerMessage =
   | { type: "session.list"; sessions: SessionSummary[] }
   | { type: "session.created"; reqId?: string; session: SessionSummary }
   | { type: "session.updated"; session: SessionSummary }
+  | { type: "session.removed"; sessionId: string }
   | { type: "session.history"; sessionId: string; entries: HistoryEntry[] }
   | { type: "session.entry"; sessionId: string; entry: HistoryEntry }
   | { type: "error"; reqId?: string; message: string };

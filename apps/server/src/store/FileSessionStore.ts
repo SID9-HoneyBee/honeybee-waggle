@@ -51,6 +51,11 @@ export class FileSessionStore {
     );
   }
 
+  /** 대기 중인 쓰기가 다 끝난 뒤 지운다. 같은 큐에 넣어야 앞선 append/saveMeta가 폴더를 다시 만들지 않는다 */
+  deleteSession(sessionId: string): Promise<void> {
+    return this.enqueue(sessionId, () => fs.rm(this.dir(sessionId), { recursive: true, force: true }));
+  }
+
   async readHistory(sessionId: string): Promise<HistoryEntry[]> {
     // 아직 디스크에 안 내려간 append가 있으면 기록에서 빠지므로 대기열이 비기를 기다린다.
     await this.queues.get(sessionId)?.catch(() => {});

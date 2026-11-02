@@ -34,6 +34,12 @@ export function startWsServer(
     const list = profiles.list();
     for (const ws of subscriptions.keys()) send(ws, { type: "profile.list", profiles: list });
   });
+  manager.on("removed", (sessionId) => {
+    for (const [ws, subs] of subscriptions) {
+      subs.delete(sessionId);
+      send(ws, { type: "session.removed", sessionId });
+    }
+  });
   manager.on("entry", (sessionId, entry) => {
     for (const [ws, subs] of subscriptions) {
       if (subs.has(sessionId)) send(ws, { type: "session.entry", sessionId, entry });
@@ -72,6 +78,10 @@ export function startWsServer(
       }
       case "session.close":
         subscriptions.get(ws)?.delete(msg.sessionId);
+        return;
+      case "session.delete":
+        await manager.delete(msg.sessionId);
+        send(ws, { type: "ack", reqId: msg.reqId });
         return;
       case "run.send":
         manager.send(msg.sessionId, msg.text);
