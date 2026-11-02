@@ -101,11 +101,13 @@ pnpm start
 
 ## 설정할 수 있는 환경변수
 
+> ⚠️ waggle은 인증이 없는 로컬 전용 도구입니다. 아래 설정을 바꾸거나 Tailscale·ngrok·터널·리버스 프록시·포트 포워딩으로 **외부에 노출하지 마세요.** 자세한 내용은 [README의 보안 안내](../README.md#보안)를 보세요.
+
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `WAGGLE_PORT` | `4317` | 서버(WebSocket·파일) 포트 |
 | `WAGGLE_DATA_DIR` | `<프로젝트>/.data` | 대화 기록·설정 저장 위치 |
-| `WAGGLE_WEB_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | 접속을 허용할 웹 주소 |
+| `WAGGLE_WEB_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | 접속을 허용할 웹 주소. **로컬에서 웹 포트를 바꿀 때만** 쓰고, 외부 주소는 절대 넣지 마세요 |
 | `CLAUDE_BIN` | 자동 탐색 | claude 실행 파일 경로 |
 | `CODEX_BIN` | 자동 탐색 | codex 실행 파일 경로 |
 | `NEXT_PUBLIC_WAGGLE_WS` | `ws://127.0.0.1:4317` | 웹이 접속할 서버 주소. **빌드할 때 고정**되므로 바꾸면 다시 빌드해야 합니다 |

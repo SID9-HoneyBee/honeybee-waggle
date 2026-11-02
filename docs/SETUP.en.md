@@ -103,11 +103,13 @@ Open **http://127.0.0.1:3000**. When the bottom-left corner shows "서버 연결
 
 ## Environment variables
 
+> ⚠️ waggle is a local-only tool with no authentication. **Never expose it** by changing these settings or by using Tailscale, ngrok, tunnels, reverse proxies, or port forwarding. See the [security notes in the README](../README.en.md#security).
+
 | Variable | Default | Description |
 |---|---|---|
 | `WAGGLE_PORT` | `4317` | Server port (WebSocket and files) |
 | `WAGGLE_DATA_DIR` | `<project>/.data` | Where history and settings are stored |
-| `WAGGLE_WEB_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Web origins allowed to connect |
+| `WAGGLE_WEB_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Web origins allowed to connect. Use it **only to change the local web port**. Never add external addresses |
 | `CLAUDE_BIN` | auto-detected | Path to the claude executable |
 | `CODEX_BIN` | auto-detected | Path to the codex executable |
 | `NEXT_PUBLIC_WAGGLE_WS` | `ws://127.0.0.1:4317` | Server address the web app connects to. **Fixed at build time**, so rebuild after changing it |
