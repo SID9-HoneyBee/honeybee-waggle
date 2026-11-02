@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import type {
   AgentEvent,
   AttachedRef,
+  FileAttachment,
   SessionRef,
   EngineAdapter,
   HistoryEntry,
@@ -13,10 +14,15 @@ import type {
 } from "@honeybee-waggle/schema";
 import type { ProfileService } from "../profiles/ProfileService";
 import type { FileSessionStore } from "../store/FileSessionStore";
-import { buildTranscript, composePrompt } from "./transcript";
+import { buildFileBlock, buildTranscript, composePrompt } from "./transcript";
 
 // 한 메시지에 너무 많은 세션을 붙이면 컨텍스트가 순식간에 차서 막아둔다.
 const MAX_REFS = 5;
+// 파일 첨부 한도. 웹에서도 같은 값으로 미리 막지만, 서버가 최종 기준이다.
+// 한 파일 20만 자(대략 8만 토큰)를 넘으면 대부분 로그·빌드 산출물이라 첨부보다 필요한 부분만 붙이는 게 맞다.
+const MAX_FILES = 10;
+const MAX_FILE_CHARS = 200_000;
+const MAX_TOTAL_FILE_CHARS = 500_000;
 
 interface ManagerEvents {
   updated: [SessionSummary];
@@ -122,10 +128,11 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     return { text, chars: text.length };
   }
 
-  send(sessionId: string, text: string, refs: SessionRef[] = []): string {
+  send(sessionId: string, text: string, refs: SessionRef[] = [], files: FileAttachment[] = []): string {
     const meta = this.require(sessionId);
     if (!text.trim()) throw new Error("빈 메시지는 보낼 수 없음");
     if (refs.length > MAX_REFS) throw new Error(`다른 세션은 한 번에 ${MAX_REFS}개까지 첨부할 수 있음`);
+    validateFiles(files);
     for (const ref of refs) {
       if (ref.sessionId === sessionId) throw new Error("현재 세션은 자기 자신을 참조할 수 없음");
       this.require(ref.sessionId);
@@ -142,7 +149,7 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     this.touch(meta);
 
     // run은 길게 돌 수 있어서 기다리지 않는다. 결과는 entry 이벤트로 흘려보낸다.
-    const execution = this.execute(meta, runId, text, refs, ac);
+    const execution = this.execute(meta, runId, text, refs, files, ac);
     this.executions.set(sessionId, execution);
     void execution.finally(() => {
       if (this.executions.get(sessionId) === execution) this.executions.delete(sessionId);
@@ -185,10 +192,21 @@ export class SessionManager extends EventEmitter<ManagerEvents> {
     runId: string,
     text: string,
     refs: SessionRef[],
+    files: FileAttachment[],
     ac: AbortController,
   ): Promise<void> {
-    const { attached, context } = await this.buildRefs(refs);
-    this.record(meta.id, { kind: "user", runId, text, ts: Date.now(), refs: attached, context });
+    const { attached, context: refContext } = await this.buildRefs(refs);
+    const fileContext = files.length ? buildFileBlock(files) : undefined;
+    const context = [refContext, fileContext].filter(Boolean).join("\n\n") || undefined;
+    this.record(meta.id, {
+      kind: "user",
+      runId,
+      text,
+      ts: Date.now(),
+      refs: attached,
+      files: files.length ? files.map((f) => ({ name: f.name, chars: f.content.length })) : undefined,
+      context,
+    });
     let completed = false;
     let failure: string | undefined;
     try {
@@ -315,4 +333,14 @@ function isPersistent(entry: HistoryEntry): boolean {
   if (ev.type === "message.delta") return false;
   if (ev.type === "raw" && (ev.payload as { type?: string } | null)?.type === "stream_event") return false;
   return true;
+}
+
+function validateFiles(files: FileAttachment[]): void {
+  if (files.length > MAX_FILES) throw new Error(`파일은 한 번에 ${MAX_FILES}개까지 첨부할 수 있음`);
+  let total = 0;
+  for (const f of files) {
+    if (f.content.length > MAX_FILE_CHARS) throw new Error(`${f.name}: 파일이 너무 큼 (${MAX_FILE_CHARS.toLocaleString()}자 초과)`);
+    total += f.content.length;
+  }
+  if (total > MAX_TOTAL_FILE_CHARS) throw new Error(`첨부 파일 합계가 너무 큼 (${MAX_TOTAL_FILE_CHARS.toLocaleString()}자 초과)`);
 }

@@ -3,16 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AttachedRef, Engine, HistoryEntry, ToolKind } from "@honeybee-waggle/schema";
+import type { AttachedFile, AttachedRef, Engine, FileAttachment, HistoryEntry, ToolKind } from "@honeybee-waggle/schema";
 import { useDialog } from "@/lib/dialog";
 import { FILES_BASE, useSessionView, useWaggle, useWaggleClient } from "@/lib/WaggleProvider";
+import { MAX_FILES, MAX_TOTAL_FILE_CHARS, readTextFiles } from "@/lib/files";
 import { approxTokens, formatTokens } from "@/lib/format";
 import { ModeBadge } from "./ModeBadge";
 import { RefPicker } from "./RefPicker";
 import { ToolCard } from "./ToolCard";
 
 type Item =
-  | { type: "user"; key: string; text: string; refs?: AttachedRef[]; context?: string }
+  | { type: "user"; key: string; text: string; refs?: AttachedRef[]; files?: AttachedFile[]; context?: string }
   | { type: "assistant"; key: string; text: string }
   | { type: "reasoning"; key: string; text: string }
   | {
@@ -112,12 +113,13 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         targetEngine={profile?.engine}
         disabled={!connected}
         running={session.running}
-        onSend={(text, refs) => {
+        onSend={(text, refs, files) => {
           stickRef.current = true;
           client.sendMessage(
             sessionId,
             text,
             refs.map((r) => ({ sessionId: r.sessionId, includeTools: r.includeTools })),
+            files,
           );
         }}
         onCancel={() => client.cancelRun(sessionId)}
@@ -131,11 +133,14 @@ function ItemView({ item, sessionId }: { item: Item; sessionId: string }) {
     case "user":
       return (
         <div className="flex flex-col items-end gap-1.5">
-          {item.refs && item.refs.length > 0 && (
+          {item.context && (
             <details className="max-w-[85%] text-xs">
               <summary className="flex cursor-pointer list-none flex-wrap justify-end gap-1.5">
-                {item.refs.map((r) => (
+                {item.refs?.map((r) => (
                   <RefChip key={r.sessionId} refInfo={r} />
+                ))}
+                {item.files?.map((f, i) => (
+                  <FileChip key={`${f.name}-${i}`} name={f.name} chars={f.chars} />
                 ))}
               </summary>
               {/* 원본 세션이 바뀌거나 지워져도 이 메시지와 함께 보냈던 그대로를 보여준다 */}
@@ -204,11 +209,13 @@ function Composer(props: {
   targetEngine?: Engine;
   disabled: boolean;
   running: boolean;
-  onSend: (text: string, refs: AttachedRef[]) => void;
+  onSend: (text: string, refs: AttachedRef[], files: FileAttachment[]) => void;
   onCancel: () => void;
 }) {
   const [text, setText] = useState("");
   const [refs, setRefs] = useState<AttachedRef[]>([]);
+  const [files, setFiles] = useState<FileAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
   const profiles = useWaggle((s) => s.profiles);
   const dialog = useDialog();
@@ -234,10 +241,23 @@ function Composer(props: {
       });
       if (!ok) return;
     }
-    props.onSend(text, refs);
+    props.onSend(text, refs, files);
     setText("");
     setRefs([]);
+    setFiles([]);
     setPicking(false);
+  }
+
+  async function addFiles(list: FileList) {
+    const { files: picked, rejected } = await readTextFiles(list);
+    const next = [...files, ...picked];
+    const total = next.reduce((n, f) => n + f.content.length, 0);
+    if (next.length > MAX_FILES) rejected.push(`파일은 한 번에 ${MAX_FILES}개까지야`);
+    else if (total > MAX_TOTAL_FILE_CHARS) rejected.push(`합계가 ${MAX_TOTAL_FILE_CHARS.toLocaleString()}자를 넘어`);
+    else setFiles(next);
+    if (rejected.length > 0) {
+      await dialog.alert({ title: "첨부하지 못한 파일이 있어", message: rejected.join("\n"), tone: "warning" });
+    }
   }
 
   return (
@@ -253,10 +273,18 @@ function Composer(props: {
           onClose={() => setPicking(false)}
         />
       )}
-      {refs.length > 0 && (
+      {(refs.length > 0 || files.length > 0) && (
         <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-1.5">
           {refs.map((r) => (
             <RefChip key={r.sessionId} refInfo={r} onRemove={() => setRefs((prev) => prev.filter((x) => x !== r))} />
+          ))}
+          {files.map((f) => (
+            <FileChip
+              key={f.name}
+              name={f.name}
+              chars={f.content.length}
+              onRemove={() => setFiles((prev) => prev.filter((x) => x !== f))}
+            />
           ))}
         </div>
       )}
@@ -272,6 +300,26 @@ function Composer(props: {
         >
           📎
         </button>
+        <button
+          type="button"
+          title="파일 첨부 (텍스트 파일)"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={props.disabled}
+          className="rounded-md border border-neutral-300 px-2.5 py-2 text-sm disabled:opacity-40 dark:border-neutral-700"
+        >
+          📄
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) void addFiles(e.target.files);
+            // 같은 파일을 지웠다가 다시 고를 때도 change가 나도록 비운다.
+            e.target.value = "";
+          }}
+        />
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -324,7 +372,7 @@ function toItems(entries: HistoryEntry[]): Item[] {
   entries.forEach((e, i) => {
     const key = String(e.seq ?? `i${i}`);
     if (e.kind === "user") {
-      items.push({ type: "user", key, text: e.text, refs: e.refs, context: e.context });
+      items.push({ type: "user", key, text: e.text, refs: e.refs, files: e.files, context: e.context });
       return;
     }
     const ev = e.event;
@@ -369,6 +417,20 @@ function RefChip({ refInfo, onRemove }: { refInfo: AttachedRef; onRemove?: () =>
       <span className="text-neutral-500">
         {refInfo.includeTools ? "도구 포함" : "정리본"} · 약 {approxTokens(refInfo.chars).toLocaleString()}토큰
       </span>
+      {onRemove && (
+        <button type="button" onClick={onRemove} className="text-neutral-400 hover:text-red-600" aria-label="첨부 제거">
+          ✕
+        </button>
+      )}
+    </span>
+  );
+}
+
+function FileChip({ name, chars, onRemove }: { name: string; chars: number; onRemove?: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-900">
+      📄 <span className="max-w-48 truncate font-mono">{name}</span>
+      <span className="text-neutral-500">약 {approxTokens(chars).toLocaleString()}토큰</span>
       {onRemove && (
         <button type="button" onClick={onRemove} className="text-neutral-400 hover:text-red-600" aria-label="첨부 제거">
           ✕

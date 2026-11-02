@@ -55,6 +55,17 @@ export interface AttachedRef extends SessionRef {
   chars: number;
 }
 
+/** 브라우저에서 고른 텍스트 파일. 내용은 메시지 context에 합쳐지고, 기록에는 이름·크기만 따로 남는다 */
+export interface FileAttachment {
+  name: string;
+  content: string;
+}
+
+export interface AttachedFile {
+  name: string;
+  chars: number;
+}
+
 /**
  * seq는 디스크에 저장된 항목에만 붙는다.
  * 세션을 열 때 "구독 → 기록 전송" 사이에 끼어든 실시간 항목이 기록과 중복될 수 있어서,
@@ -68,7 +79,8 @@ export type HistoryEntry = (
       text: string;
       ts: number;
       refs?: AttachedRef[];
-      /** 첨부 정리본을 합친 텍스트. 모델에는 context + text가 간다. 대화 재구성(Claude API)도 이 값을 쓴다 */
+      files?: AttachedFile[];
+      /** 첨부(세션 정리본·파일)를 합친 텍스트. 모델에는 context + text가 간다. 대화 재구성(Claude API)도 이 값을 쓴다 */
       context?: string;
     }
   | { kind: "event"; event: AgentEvent }
@@ -81,7 +93,7 @@ export type ClientMessage = { reqId?: string } & (
   | { type: "session.close"; sessionId: string }
   | { type: "session.delete"; sessionId: string }
   | { type: "session.rename"; sessionId: string; title: string }
-  | { type: "run.send"; sessionId: string; text: string; refs?: SessionRef[] }
+  | { type: "run.send"; sessionId: string; text: string; refs?: SessionRef[]; files?: FileAttachment[] }
   | { type: "session.transcript"; sessionId: string; includeTools: boolean }
   | { type: "run.cancel"; sessionId: string }
   | { type: "profile.list" }

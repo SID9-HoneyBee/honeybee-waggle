@@ -2,6 +2,7 @@ import type {
   ClientMessage,
   HistoryEntry,
   KeyProvider,
+  FileAttachment,
   PermissionLevel,
   ProfileInfo,
   SessionRef,
@@ -151,8 +152,8 @@ export class WaggleClient {
     await this.request({ type: "settings.setBudget", profileId, budgetUsd });
   }
 
-  sendMessage(sessionId: string, text: string, refs?: SessionRef[]): void {
-    if (!this.rawSend({ type: "run.send", reqId: this.nextReqId(), sessionId, text, refs })) {
+  sendMessage(sessionId: string, text: string, refs?: SessionRef[], files?: FileAttachment[]): void {
+    if (!this.rawSend({ type: "run.send", reqId: this.nextReqId(), sessionId, text, refs, files })) {
       this.notify("서버에 연결되어 있지 않아 보내지 못했어.");
     }
   }
